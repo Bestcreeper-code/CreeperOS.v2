@@ -1,0 +1,6 @@
+[submodule "kernel/src/printf"]
+	path = kernel/src/printf
+	url = https://github.com/mpaland/printf
+[submodule "Flanterm"]
+	path = Flanterm
+	url = https://github.com/Mintsuki/Flanterm.git
