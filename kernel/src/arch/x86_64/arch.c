@@ -22,6 +22,7 @@ void arch_init(){
 
     init_gdt();
     idt_init();
+    register_cpu_exceptions();
 
     //mem
     pmm_init();

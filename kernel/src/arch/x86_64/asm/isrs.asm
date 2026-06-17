@@ -2,7 +2,7 @@
 
 extern _panic_handler
 
-%define MAX_STACK_TRACE_SIZE 0
+%define MAX_STACK_TRACE_SIZE 3
 
 %macro SAVE_ALL 0
     push r15
@@ -153,7 +153,6 @@ isr%1:
     jmp  isr_common_handler
 %endmacro
 
-ISR_NOCRASH  3    ; breakpoint (#BP)
 ISR_NOCRASH  4    ; overflow (#OF)
 ISR_NOCRASH  7    ; device not available (#NM) – handle in C if needed
 ISR_NOCRASH  9    ; coprocessor segment overrun (obsolete, never fires)
@@ -163,6 +162,7 @@ ISR_NOCRASH 16    ; x87 floating-point (#MF)
 ISR_NOERR  0      ; divide-by-zero (#DE)
 ISR_NOERR  1      ; debug (#DB)
 ISR_NOERR  2      ; non-maskable interrupt (NMI)
+ISR_NOERR  3      ; breakpoint (#BP)
 ISR_NOERR  5      ; bound range exceeded (#BR)
 ISR_NOERR  6      ; invalid opcode (#UD)
 ISR_NOERR 18      ; machine check (#MC)

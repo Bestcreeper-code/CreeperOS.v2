@@ -165,8 +165,7 @@ $(IMAGE_NAME).iso: limine-binary/limine kernel initrd.tar
 	rm -rf iso_root/*
 
 initrd.tar: $(INITRD_PATH)
-	initrd.tar: $(INITRD_PATH)
-	cd $(INITRD_PATH) && tar -cf ../../../initrd.tar *
+	tar -cf initrd.tar -C $(INITRD_PATH) .
 
 $(AHCI_DISK1):
 	fallocate -l 1G $(AHCI_DISK1)

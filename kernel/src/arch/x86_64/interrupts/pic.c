@@ -21,5 +21,6 @@ void pic_remap() {
     outb(0x21, 0x0);  // Clear master PIC mask (enable all IRQs)
     outb(0xA1, 0x0);  // Clear slave PIC mask (enable all IRQs)
 
+    
     Sys_Success("PIC remapped\n");
 }

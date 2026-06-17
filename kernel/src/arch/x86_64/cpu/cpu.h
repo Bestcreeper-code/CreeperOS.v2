@@ -80,3 +80,5 @@ extern uint64_t cpu_features;
 
 int cpu_log_specs();
 void register_cpu_features();
+
+void register_cpu_exceptions();

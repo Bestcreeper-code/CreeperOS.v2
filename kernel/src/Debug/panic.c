@@ -191,7 +191,7 @@ void _panic_handler(uint64_t isr_index, uint64_t err_code, cpu_registers_t* regs
          isr_index < (int)(sizeof(crash_messages) / sizeof(crash_messages[0])))
             ? crash_messages[isr_index]
             : "Unknown Crash";
-
+    Sys_log_NoPos(ESC_RED);
     Sys_log_NoPos("=======================================================================\n");
     Sys_log_NoPos("KERNEL PANIK -> ISR Index: %lu (%s), Error Code: %lx\n",
         isr_index, error_name, err_code);
