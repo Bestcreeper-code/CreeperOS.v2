@@ -6,6 +6,8 @@
 #include "vfs/ramfile.h"
 #include "defines/err_codes.h"
 #include "vfs/vfs.h"
+#include "memops.h"
+
 #include <stdint.h>
 #include <limine.h>
 
@@ -29,7 +31,6 @@ int initrd_init() {
     struct limine_file *initrd = NULL;
     for (uint64_t i = 0; i < resp->module_count; i++) {
         struct limine_file *f = resp->modules[i];
-        Sys_Debug("checking module %ld",i);
         if (f->string && __builtin_strcmp(f->string, "initrd") == 0) {
             initrd = f;
             break;
@@ -45,8 +46,8 @@ int initrd_init() {
     uintptr_t size    = initrd->size;
 
 #if INITRD_DEBUG
-    Sys_log("[initrd vaddr] %p\n", initrd_data);
-    Sys_log("[initrd size]  %p\n", (void *)size);
+    Sys_Debug("[initrd vaddr] %p\n", initrd_data);
+    Sys_Debug("[initrd size]  %p\n", (void *)size);
 #endif
 
     parse_tar((uintptr_t)initrd_data);
@@ -65,10 +66,13 @@ int initrd_init() {
         return -E_NOENT;
     }
 
+    
     struct tar_header *header = tar_file_headers[0];
     for (int i = 0; header != NULL; header = tar_file_headers[++i]) {
+        memmove(header->filename, &header->filename[2], 98);
+
 #if INITRD_DEBUG
-        Sys_log("File: %s, size: %u\n",
+        Sys_Debug("File: %s, size: %u\n",
                 header->filename, get_tar_size(header->size));
 #endif
         struct dentry *new_dentry = kmalloc(sizeof(struct dentry));

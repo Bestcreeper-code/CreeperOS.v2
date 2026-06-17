@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <limine.h>
 #include "arch/arch.h"
+#include "asm/ams.h"
 #include "drivers/drivers.h"
 #include "initrd_parse/initrd.h"
 #include "string/string.h"
@@ -86,6 +87,7 @@ void _kstart() {
 }
 
 void kmain() {
+    sti();
     
     core_init();
     initrd_init();
@@ -96,9 +98,7 @@ void kmain() {
     
     // fs_init();
     // late_init();
-
-    
     // We're done, just hang...
-    Sys_Warning("Kernel reached halt(shouldn't happen)\n");
+    Sys_Warning("Kernel reached halt\n");
     hcf();
 }

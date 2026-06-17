@@ -86,7 +86,7 @@ int Unregister_Block_Device(struct block_device* blkdev){
             blkdev->list.next->prev = blkdev->list.prev;
     }
 
-    bitmap_zero_bit((char*)_blkdev_id_map, blkdev->id);
+    bitmap_set((char*)_blkdev_id_map, blkdev->id, 0);
     kfree(blkdev);
     return 0;
 }

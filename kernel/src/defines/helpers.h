@@ -4,11 +4,14 @@
 
 
 size_t bitmap_alloc_1_first(char *bitmap, size_t nbytes);
-ssize_t wbitmap_alloc_1_first(char *bitmap, size_t nbytes);
+size_t wbitmap_alloc_1_first(char *bitmap, size_t nbytes);
 
-inline static void bitmap_zero_bit(char *bitmap, size_t pos) {
-    size_t byte = pos / 8;
-    size_t bit  = pos % 8;
-    bitmap[byte] &= ~(1U << bit);
-    
+static inline void bitmap_set(char *bitmap, size_t idx, int state) {
+    size_t byte = idx / 8;
+    size_t bit  = idx % 8;
+
+    if (state)
+        bitmap[byte] |=  (1U << bit);
+    else
+        bitmap[byte] &= ~(1U << bit);
 }
