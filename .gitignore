@@ -1,0 +1,15 @@
+kernel/compile_commands.json
+kernel/.cache
+kernel/.deps-obtained
+kernel/freestanding-c-hdrs
+kernel/cc-runtime
+kernel/limine-protocol
+kernel/bin-*
+kernel/bin
+kernel/obj
+kernel/obj-*
+*.iso
+*.vscode
+*.img
+gdb.txt
+src/compile_commands.json
