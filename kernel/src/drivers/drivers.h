@@ -1,5 +1,5 @@
 #pragma once
-#include "Debug/Logger.h"
+#include "debug/Logger.h"
 #include "defines/compiler_defs.h"
 
 typedef struct {

@@ -1,6 +1,6 @@
-#include "panic.h"
+#include "debug/panic.h"
 
-#include "Debug/Logger.h"
+#include "debug/Logger.h"
 #include "timer/time.h"
 #include "asm/ams.h"
 #include "memops.h"

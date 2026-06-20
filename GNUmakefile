@@ -8,7 +8,8 @@ EXTRA_QEMU_DEPS :=
 
 AHCI_DISK1 := ahci_1.img
 
-QEMUFLAGS += -device ich9-ahci,id=ahci
+QEMUFLAGS += -device ich9-ahci,id=ahci 
+QEMUFLAGS += -machine q35,acpi=off
 
 QEMUFLAGS += -drive file=$(AHCI_DISK1),format=raw,if=none,id=disk1
 QEMUFLAGS += -device ide-hd,drive=disk1,bus=ahci.0

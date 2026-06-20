@@ -65,7 +65,8 @@ override CFLAGS += \
     -fno-lto \
     -fno-PIC \
     -ffunction-sections \
-    -fdata-sections
+    -fdata-sections \
+    -fno-omit-frame-pointer
 
 # Internal C preprocessor flags.
 override CPPFLAGS := \

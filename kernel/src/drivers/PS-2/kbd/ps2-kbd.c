@@ -1,13 +1,16 @@
-#include "Debug/Logger.h"
+#include "debug/Logger.h"
 #include "arch/interrupts.h"
 #include "arch/x86_64/cpu/idt.h"
 #include "asm/ams.h"
 #include "defines/compiler_defs.h"
 #include "ps2-kbd.h"
+#include "input/input.h"
 #include "memops.h"
 #include "drivers/drivers.h"
+#include "vfs/vfs.h"
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 
@@ -21,7 +24,7 @@ char current_Language = KB_LAY_AZERTY;
 #define GET_KEYBOARD_MOD_FLAG(flag) \
     ((kbd_mod_keys) & (flag))
 
-#define HARDCODED_PS2_KBD_INTERRUPT_VECTOR_INDEX 34
+#define HARDCODED_PS2_KBD_INTERRUPT_VECTOR_INDEX 33
 
 
 #define NUM_SCANCODES 128
@@ -179,26 +182,26 @@ unsigned char GetInputCharNonBlocking(void) {
 
 
 
-unsigned char getc(){
-    unsigned char chr = 0;
-    while (chr == 0) {
-        __asm__ __volatile__("sti; hlt");
-        if (buf_head != buf_tail) {
-            chr = input_char_buffer[buf_head];
-            buf_head = (buf_head + 1) % INPUT_CHAR_BUFFER_SIZE;
-        }
-    }
-    return chr;
-}
+// unsigned char getc(){
+//     unsigned char chr = 0;
+//     while (chr == 0) {
+//         __asm__ __volatile__("sti; hlt");
+//         if (buf_head != buf_tail) {
+//             chr = input_char_buffer[buf_head];
+//             buf_head = (buf_head + 1) % INPUT_CHAR_BUFFER_SIZE;
+//         }
+//     }
+//     return chr;
+// }
 
 
-unsigned char getc_nb(){
-    if (buf_head == buf_tail)
-        return 0;
-    unsigned char chr = input_char_buffer[buf_head];
-    buf_head = (buf_head + 1) % INPUT_CHAR_BUFFER_SIZE;
-    return chr;
-}
+// unsigned char getc_nb(){
+//     if (buf_head == buf_tail)
+//         return 0;
+//     unsigned char chr = input_char_buffer[buf_head];
+//     buf_head = (buf_head + 1) % INPUT_CHAR_BUFFER_SIZE;
+//     return chr;
+// }
 
 GCC_ATTR((interrupt))
 void ps2_keyboard_handler(void* frame) {
@@ -209,30 +212,70 @@ void ps2_keyboard_handler(void* frame) {
             input_char_buffer[buf_tail] = ch;
             buf_tail = next_tail;
         }
+        Sys_log_NoPos("%c",ch);
     }
-    Sys_Info("kbd %02x(%c)",ch,ch);
     outb(0x20, 0x20);
 }
 
 
-int ps2_kbd_init() {
 
+
+int ps2_kbd_read(struct input_device *dev, void *buf, size_t count, loff_t offset) {
+    
+
+    size_t bytes_read = 0;
+    unsigned char *out = (unsigned char *)buf;
+
+    while (bytes_read < count) {
+        unsigned char ch = 0;
+        while (ch == 0) {
+            __asm__ __volatile__("sti; hlt");
+            if (buf_head != buf_tail) {
+                ch = input_char_buffer[buf_head];
+                buf_head = (buf_head + 1) % INPUT_CHAR_BUFFER_SIZE;
+            }
+        }
+
+        out[bytes_read++] = ch;
+
+    }
+
+    return (int)bytes_read;
+}
+
+struct input_device_ops ps2_kbd_ops = {
+    .read  = ps2_kbd_read,
+    .write = vfs_inv_func,
+    .ioctl = (int (*)(struct input_device *, int, ...))vfs_inv_func
+};
+
+int ps2_kbd_init() {
+    setup_interrupt_vector(HARDCODED_PS2_KBD_INTERRUPT_VECTOR_INDEX, ps2_keyboard_handler, IRQ_FLAG_INTERRUPT);
+
+    
+    
+    outb(0x64, 0xAE);//enable kbd port
+    
+    
+    outb(0x60, 0xF4);//enable scanning
+    
+        
+    // while (!(inb(0x64) & 0x01));
+    uint8_t ack = inb(0x60);
+    Sys_Info("ACK: %02x\n", ack);
+    
     uint8_t master_mask = inb(0x21);
     master_mask &= ~(1 << 1);
     outb(0x21, master_mask);
 
-    idt_set_allocated(HARDCODED_PS2_KBD_INTERRUPT_VECTOR_INDEX);
-    setup_interrupt_vector(HARDCODED_PS2_KBD_INTERRUPT_VECTOR_INDEX,
-        ps2_keyboard_handler,
-        IRQ_FLAG_INTERRUPT
-    );
-
-    idt_set_gate(3, (uintptr_t)ps2_keyboard_handler,  0x08, 0x8E);
-    
-    idt_set_gate(31, (uintptr_t)ps2_keyboard_handler,  0x08, 0x8E);
-    idt_set_gate(32, (uintptr_t)ps2_keyboard_handler,  0x08, 0x8E);
-    idt_set_gate(33, (uintptr_t)ps2_keyboard_handler,  0x08, 0x8E);
-    idt_set_gate(34, (uintptr_t)ps2_keyboard_handler,  0x08, 0x8E);
+    if(register_input_device(
+        "PS/2 Keyboard",
+        &ps2_kbd_ops,
+        NULL
+    ) == NULL ){
+        Sys_Error("couldn't register ps2 in input registery\n");
+        return -1;
+    }
     
     return 0;
 }

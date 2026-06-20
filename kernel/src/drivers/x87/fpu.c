@@ -1,6 +1,6 @@
 #include "fpu.h"
 
-#include "Debug/Logger.h"
+#include "debug/Logger.h"
 #include "arch/x86_64/cpu/cpu.h"
 #include "drivers/drivers.h"
 

@@ -1,5 +1,5 @@
 #include "drivers.h"
-#include "Debug/Logger.h"
+#include "debug/Logger.h"
 
 
 extern init_driver_t __start_core_drivers[], __stop_core_drivers[];

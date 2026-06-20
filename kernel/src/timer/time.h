@@ -1,8 +1,9 @@
+#pragma once
 #include <stdint.h>
 
 
-void timer_register(uint64_t (*get_ticks_ms)(), int priority);
 
 uint64_t timer_get_ms();
-
+uint64_t timer_get_us();
 void sleep_ms(uint64_t ms);
+void sleep_us(uint64_t us);

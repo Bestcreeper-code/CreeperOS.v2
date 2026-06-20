@@ -1,5 +1,5 @@
 #include "pic.h"
-#include "Debug/Logger.h"
+#include "debug/Logger.h"
 #include "asm/ams.h"
 
 void pic_remap() {

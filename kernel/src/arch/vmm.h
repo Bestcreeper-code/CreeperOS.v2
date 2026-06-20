@@ -43,7 +43,7 @@ typedef uintptr_t page_index;
 #define ADDR_TO_PAGE(addr) ((page_index)((addr) / PAGE_SIZE_4K))
 #define PAGE_TO_ADDR(pg)   ((uintptr_t)(pg) * PAGE_SIZE_4K)
 
-extern uintptr_t kernel_pml4_phys;
+extern uintptr_t kernel_pagedir_phys;
 extern volatile uintptr_t hhdm_offset;
 
 

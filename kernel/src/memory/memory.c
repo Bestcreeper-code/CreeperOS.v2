@@ -153,7 +153,7 @@ int init_allocator() {
             return -1;
         }
 
-        uint64_t *pml4 = (uint64_t *)PHYS_2_HHDM(kernel_pml4_phys);
+        uint64_t *pml4 = (uint64_t *)PHYS_2_HHDM(kernel_pagedir_phys);
         map_4k(pml4, va, pa, PTE_PRESENT | PTE_WRITABLE);
 
         if (k_mmap->free_region_count < MAX_FREE_REGIONS) {
@@ -268,7 +268,7 @@ void *kmalloc_impl(size_t size) {
             return NULL;
         }
 
-        uint64_t *pml4 = (uint64_t *)PHYS_2_HHDM(kernel_pml4_phys);
+        uint64_t *pml4 = (uint64_t *)PHYS_2_HHDM(kernel_pagedir_phys);
         for (size_t i = 0; i < pages_needed; i++)
             map_4k(pml4,
                    va + i * PMM_PAGE_SIZE,
@@ -415,7 +415,7 @@ uintptr_t page_kalloc(size_t count, uint64_t flags) {
     uintptr_t pa  = pmm_alloc_pages_zeroed(count);
     uintptr_t va  = kvma_alloc(count);
 
-    uint64_t *pml4 = (uint64_t *)PHYS_2_HHDM(kernel_pml4_phys);
+    uint64_t *pml4 = (uint64_t *)PHYS_2_HHDM(kernel_pagedir_phys);
     for (size_t i = 0; i < count; i++)
         map_4k(pml4,
                va + i * PMM_PAGE_SIZE,

@@ -1,10 +1,37 @@
 [BITS 64]
-
 extern _panic_handler
-
-%define MAX_STACK_TRACE_SIZE 3
+%define MAX_STACK_TRACE_SIZE 16
 
 %macro SAVE_ALL 0
+    mov  rax, cr8
+    push rax
+    mov  rax, cr4
+    push rax
+    mov  rax, cr3
+    push rax
+    mov  rax, cr2
+    push rax
+    mov  rax, cr0
+    push rax
+
+    sub  rsp, 2
+    mov  word [rsp], ss
+    sub  rsp, 2
+    mov  word [rsp], gs
+    sub  rsp, 2
+    mov  word [rsp], fs
+    sub  rsp, 2
+    mov  word [rsp], es
+    sub  rsp, 2
+    mov  word [rsp], ds
+    sub  rsp, 2
+    mov  word [rsp], cs
+
+    pushfq
+
+    lea  rax, [rel $] ;<<<<<
+    push rax
+
     push r15
     push r14
     push r13
@@ -13,82 +40,51 @@ extern _panic_handler
     push r10
     push r9
     push r8
+
+    mov  rax, [rsp + 172]
+    push rax
+
     push rbp
     push rdi
     push rsi
     push rdx
     push rcx
     push rbx
-    push rax
-    
-    pushfq
-
-    lea rax, [rel $]
-    push rax
-
-    xor rax, rax
-    mov ax, cs
-    push rax
-    mov ax, ds
-    push rax
-    mov ax, es
-    push rax
-    mov ax, fs
-    push rax
-    mov ax, gs
-    push rax
-    mov ax, ss
-    push rax
-    
-    mov rax, cr0
-    push rax
-    mov rax, cr2
-    push rax
-    mov rax, cr3
-    push rax
-    mov rax, cr4
-    push rax
-    mov rax, cr8
+    xor  rax, rax
     push rax
 %endmacro
-
 
 %macro RESTORE_ALL 0
-    add rsp, 13*8
-    pop rax
-    pop rbx
-    pop rcx
-    pop rdx
-    pop rsi
-    pop rdi
-    pop rbp
-    pop r8
-    pop r9
-    pop r10
-    pop r11
-    pop r12
-    pop r13
-    pop r14
-    pop r15
+    pop  rax
+    pop  rbx
+    pop  rcx
+    pop  rdx
+    pop  rsi
+    pop  rdi
+    pop  rbp
+    add  rsp, 8
+    pop  r8
+    pop  r9
+    pop  r10
+    pop  r11
+    pop  r12
+    pop  r13
+    pop  r14
+    pop  r15
+    add  rsp, 68
 %endmacro
-
 
 section .bss
 align 8
 isr_call_stack  resq MAX_STACK_TRACE_SIZE
 
-
 section .text
-
 isr_common_handler:
-    
-    mov  rax, [rsp + 11*8]
+    mov  rax, [rsp + 128]
     mov  [isr_call_stack], rax
 
-    
-    mov  rbp, [rsp + 19*8]
+    mov  rbp, [rsp + 48]
     mov  rcx, 1
-
 .trace_loop:
     cmp  rcx, MAX_STACK_TRACE_SIZE
     jge  .trace_done
@@ -103,7 +99,6 @@ isr_common_handler:
     inc  rcx
     mov  rbp, [rbp]
     jmp  .trace_loop
-
 .trace_done:
     cmp  rcx, MAX_STACK_TRACE_SIZE
     jge  .zero_done
@@ -113,17 +108,14 @@ isr_common_handler:
     cmp  rcx, MAX_STACK_TRACE_SIZE
     jl   .zero_loop
 .zero_done:
-
-    ; _panic_handler(index, err_code, regs*, call_stack*) 
-    mov  rdi, [rsp + 28*8]
-    mov  rsi, [rsp + 29*8]
+    mov  rdi, [rsp + 196]
+    mov  rsi, [rsp + 204]
     lea  rdx, [rsp]
     lea  rcx, [isr_call_stack]
     sub  rsp, 8
     call _panic_handler
     add  rsp, 8
 
-    
     RESTORE_ALL
     add  rsp, 16
     iretq
@@ -149,41 +141,40 @@ global isr%1
 isr%1:
     cli
     push qword %1
+    push qword 0
     SAVE_ALL
     jmp  isr_common_handler
 %endmacro
 
-ISR_NOCRASH  4    ; overflow (#OF)
-ISR_NOCRASH  7    ; device not available (#NM) – handle in C if needed
-ISR_NOCRASH  9    ; coprocessor segment overrun (obsolete, never fires)
-ISR_NOCRASH 15    ; reserved
-ISR_NOCRASH 16    ; x87 floating-point (#MF)
-
-ISR_NOERR  0      ; divide-by-zero (#DE)
-ISR_NOERR  1      ; debug (#DB)
-ISR_NOERR  2      ; non-maskable interrupt (NMI)
-ISR_NOERR  3      ; breakpoint (#BP)
-ISR_NOERR  5      ; bound range exceeded (#BR)
-ISR_NOERR  6      ; invalid opcode (#UD)
-ISR_NOERR 18      ; machine check (#MC)
-ISR_NOERR 19      ; SIMD floating-point (#XM / #XF)
-ISR_NOERR 20      ; virtualisation (#VE)
-ISR_NOERR 21      ; control-protection (#CP)
-ISR_NOERR 22      ; reserved
-ISR_NOERR 23      ; reserved
-ISR_NOERR 24      ; reserved
-ISR_NOERR 25      ; reserved
-ISR_NOERR 26      ; reserved
-ISR_NOERR 27      ; reserved
-ISR_NOERR 28      ; hypervisor injection (#HV)
-ISR_NOERR 29      ; VMM communication (#VC)
-ISR_NOERR 30      ; security exception (#SX)
-ISR_NOERR 31      ; reserved
-
-ISR_ERR  8        ; double fault (#DF)       – error code always 0
-ISR_ERR 10        ; invalid TSS (#TS)
-ISR_ERR 11        ; segment not present (#NP)
-ISR_ERR 12        ; stack-segment fault (#SS)
-ISR_ERR 13        ; general protection (#GP)
-ISR_ERR 14        ; page fault (#PF)
-ISR_ERR 17        ; alignment check (#AC)
+ISR_NOCRASH  4
+ISR_NOCRASH  7
+ISR_NOCRASH  9
+ISR_NOCRASH 15
+ISR_NOCRASH 16
+ISR_NOERR  0
+ISR_NOERR  1
+ISR_NOERR  2
+ISR_NOERR  3
+ISR_NOERR  5
+ISR_NOERR  6
+ISR_NOERR 18
+ISR_NOERR 19
+ISR_NOERR 20
+ISR_NOERR 21
+ISR_NOERR 22
+ISR_NOERR 23
+ISR_NOERR 24
+ISR_NOERR 25
+ISR_NOERR 26
+ISR_NOERR 27
+ISR_NOERR 28
+ISR_NOERR 29
+ISR_NOERR 30
+ISR_NOERR 31
+ISR_ERR  8
+ISR_ERR 10
+ISR_ERR 11
+ISR_ERR 12
+ISR_ERR 13
+ISR_ERR 14
+ISR_ERR 17

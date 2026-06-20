@@ -1,5 +1,5 @@
 #include "initrd.h"
-#include "Debug/Logger.h"
+#include "debug/Logger.h"
 #include "drivers/drivers.h"
 #include "memory/memory.h"
 #include "vfs/fs.h"
@@ -100,7 +100,6 @@ int initrd_init() {
 
     return 0;
 }
-REGISTER_DRIVER_FS(initrd, initrd_init);
 
 
 

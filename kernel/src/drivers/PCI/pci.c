@@ -1,6 +1,6 @@
 #include "pci.h"
 
-#include "Debug/Logger.h"
+#include "debug/Logger.h"
 #include "drivers/drivers.h"
 #include "pci_config_io.h"
 

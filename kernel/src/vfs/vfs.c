@@ -134,3 +134,8 @@ int vfs_unlink(struct inode* dir, struct dentry* dentry) {
 
     return 0;
 }
+
+
+int vfs_inv_func(){
+    RET_ERR(E_INVAL);
+}

@@ -1,6 +1,6 @@
 #include "arch/vmm.h"
-#include "Debug/Logger.h"
-#include "Debug/panic.h"
+#include "debug/Logger.h"
+#include "debug/panic.h"
 #include "asm/ams.h"
 #include "defines/container_of.h"
 #include "memory/pmm.h"
@@ -18,7 +18,7 @@ extern char _kernel_end[];
 
 
 volatile uintptr_t hhdm_offset = 0;
-uintptr_t kernel_pml4_phys = 0;
+uintptr_t kernel_pagedir_phys = 0;
 
 
 static inline uint64_t *phys_to_boot_virt(uintptr_t phys) {
@@ -66,7 +66,7 @@ static void hhdm_check_coverage() {
     for (uint64_t i = 0; i < mm->entry_count; i++) {
         struct limine_memmap_entry *e = mm->entries[i];
         uintptr_t end = (uintptr_t)(e->base + e->length);
-        Sys_Info("limine_memmap_entries[%d]" "\t" "base:%lx" "\t" "length:%lx" "\t" "type:%ld\n",i,e->base,e->length,e->type);
+        Sys_Debug("limine_memmap_entries[%d]" "\t" "base:%lx" "\t" "length:%lx" "\t" "type:%ld\n",i,e->base,e->length,e->type);
         if (end > top) top = end;
     }
 
@@ -115,7 +115,7 @@ void hhdm_init() {
     hhdm_map_kernel(pml4);
 
     hhdm_offset = HHDM_VBASE;
-    kernel_pml4_phys = pml4_phys;
+    kernel_pagedir_phys = pml4_phys;
     cr3_set(pml4_phys);
 }
 

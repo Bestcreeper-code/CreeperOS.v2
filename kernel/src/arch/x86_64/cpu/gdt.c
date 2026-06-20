@@ -1,5 +1,5 @@
 #include "arch/x86_64/cpu/gdt.h"
-#include "Debug/Logger.h"
+#include "debug/Logger.h"
 #include "memops.h"
 
 
