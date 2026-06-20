@@ -3,6 +3,7 @@
 #include <stdbool.h>
 #include <limine.h>
 #include "arch/arch.h"
+#include "arch/x86_64/scheduler/scheduler.h"
 #include "asm/ams.h"
 #include "defines/types.h"
 #include "drivers/drivers.h"
@@ -12,6 +13,7 @@
 #include "memory/pmm.h"
 #include "memops.h"
 #include "arch/vmm.h"
+#include "timer/time.h"
 #include "vfs/fs.h"
 #include "vfs/sysfs.h"
 #include "printf/printf.h"
@@ -87,17 +89,27 @@ void _kstart() {
     arch_init();//calls kmain at the end
 }
 
+void loop(){
+    // Sys_log("\e[32mFINALLY it works\e[0m\n");
+    sleep_ms(1000);
+    _scheduler_current_process->exit_code=-999999;
+    kill_ktask(_scheduler_current_process);
+    _yield();
+}
+
 void kmain() {
     cli();
     
     core_init();
     sysfs_init();
     // fs_init();
+    scheduler_init();
     initrd_init();
     
     dev_init();
 
     sti();    
+    Sys_Info("loop1 %p\n", ktask_start(loop, "loop1"));
     
     tree(root_dentry, 0);
     

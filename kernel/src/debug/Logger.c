@@ -1,6 +1,8 @@
 #include "Logger.h"
 
 #include "asm/ams.h"
+#include "defines/compiler_defs.h"
+#include "memory/memory.h"
 #include "printf/printf.h"
 #include <stdbool.h>
 #include <stdarg.h>
@@ -10,6 +12,12 @@
 
 static uint8_t current_fg = ANSI_WHITE;
 static uint8_t current_bg = ANSI_BG_BLACK;
+
+static volatile bool is_threaded = false;
+#define LOG_RING_QUEUE_SIZE 128
+static char* log_ring_queue[LOG_RING_QUEUE_SIZE];
+static int log_ring_queue_write_idx;
+static int log_ring_queue_read_idx;
 
 
 void serial_init() {
@@ -41,30 +49,50 @@ void serial_write_string(const char* str) {
 }
 
 
+
+
 #define LOG_BUFFER_SIZE 512
 void sys_serial_vlogf(const char* format, const char* file,
     const char* func, int line, va_list args)
 {
-    char msg[LOG_BUFFER_SIZE];
-    vsnprintf(msg, sizeof(msg), format, args);
+    if(!is_threaded) {
+        char msg[LOG_BUFFER_SIZE];
+        vsnprintf(msg, sizeof(msg), format, args);
 
-    if (func != NULL && line != 0) {
-        char serial_out[LOG_BUFFER_SIZE];
-        snprintf(serial_out, sizeof(serial_out),
-                 "< %s:%d(%s)> %s",
-                 file, line, func, msg);
-        serial_write_string(serial_out);
-    } else if (file != NULL && file[0] != '\0') {
-        char serial_out[LOG_BUFFER_SIZE];
-        snprintf(serial_out, sizeof(serial_out),
-                 "< %s> %s",
-                 file, msg);
-        serial_write_string(serial_out);
-    } else {
-        serial_write_string(msg);
+        
+        if (func != NULL && line != 0) {
+            char serial_out[LOG_BUFFER_SIZE];
+            snprintf(serial_out, sizeof(serial_out),
+            "< %s:%d(%s)> %s",
+            file, line, func, msg);
+            serial_write_string(serial_out);
+        } else if (file != NULL && file[0] != '\0') {
+            char serial_out[LOG_BUFFER_SIZE];
+            snprintf(serial_out, sizeof(serial_out),
+            "< %s> %s",
+            file, msg);
+            serial_write_string(serial_out);
+        } else {
+            serial_write_string(msg);
+        }
+        
+        printf("%s", msg);
     }
+    else {
+        if(log_ring_queue[(log_ring_queue_write_idx+1)%arr_lengthof(log_ring_queue)]){
+            return;
+        }
+        
+        char* msg = kmalloc(LOG_BUFFER_SIZE);
+        vsnprintf(msg, LOG_BUFFER_SIZE, format, args);
 
-    printf("%s", msg);
+        log_ring_queue[log_ring_queue_write_idx] = msg;
+        
+        log_ring_queue_write_idx = (log_ring_queue_write_idx+1) % arr_lengthof(log_ring_queue);
+        
+        
+
+    }
 }
 
 	

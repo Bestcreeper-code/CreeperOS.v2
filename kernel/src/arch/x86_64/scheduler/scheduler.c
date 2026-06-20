@@ -11,6 +11,7 @@
 #include "memory/pmm.h"
 #include "string/string.h"
 
+#include <stddef.h>
 #include <stdint.h>
 
 HLIST_HEAD(_scheduler_process_list_head);
@@ -49,6 +50,33 @@ void _free_pid(pid_t pid) {
     pid_bitmap[index] |= (1ULL << bit);
 }
 
+
+
+
+
+
+
+
+#define SCHED_LOG_INTERVAL 1000U
+
+static void _log_all_processes() {
+    Sys_log("--- process list ---\n");
+    struct hlist_node *n = _scheduler_process_list_head.first;
+    while (n) {
+        Linked_PCB_t *p = container_of(n, Linked_PCB_t, list_node);
+        Sys_log("  pid=%-4u  state=0x%02x  name=%s\n",
+                (unsigned)p->pid, (unsigned)p->state, p->name);
+        n = n->next;
+    }
+    Sys_log("--------------------\n");
+}
+
+
+
+
+
+
+
 Linked_PCB_t* new_pcb(physptr_t page_dir, const char* name, uint64_t* rsp, Stack_t k_stack, Stack_t us_stack) {
     Linked_PCB_t* new_pcb = (Linked_PCB_t*)kmalloc(sizeof(Linked_PCB_t));
     if (!new_pcb) return NULL;
@@ -79,7 +107,7 @@ Linked_PCB_t* new_pcb(physptr_t page_dir, const char* name, uint64_t* rsp, Stack
 int kill_ktask(Linked_PCB_t* pcb) {
     if (!pcb) return -1;
 
-    Sys_log("K Process %u (%s) exited with err:%d\n", pcb->pid, pcb->name, pcb->exit_code);
+    Sys_log("ktask %u (%s) exited with code:%d\n", pcb->pid, pcb->name, pcb->exit_code);
 
     hlist_del(&pcb->list_node);
     _free_pid(pcb->pid);
@@ -93,7 +121,6 @@ int kill_ktask(Linked_PCB_t* pcb) {
     return 0;
 }
 
-// REGISTER_DRIVER_CORE(scheduler, scheduler_init);
 
 int scheduler_init() {
     pid_bitmap[0] &= ~(1ULL << 0);
@@ -116,32 +143,39 @@ int scheduler_init() {
 void enable_scheduler() { task_switching_flag = 1; }
 void disable_scheduler() { task_switching_flag = 0; }
 
-void _setup_user_stack_sched_frame(void* us_stack_top, void* k_stack_top, uint64_t entry, uint64_t* out_rsp) {
+
+
+void _build_kernel_stack_frame(uint64_t* stack_top, uint64_t entry) {
+    uint64_t base = *stack_top;
     ProcessStackFrame* frame =
-        (ProcessStackFrame*)((uint8_t*)k_stack_top - sizeof(ProcessStackFrame));
+        (ProcessStackFrame*)(base - sizeof(ProcessStackFrame));
 
     memset(frame, 0, sizeof(ProcessStackFrame));
 
-    frame->rip = entry;
-    frame->cs = USER_CODE_SEGMENT;
+    frame->rip    = entry;
+    frame->cs     = KERNEL_CODE_SEGMENT;
     frame->rflags = 0x202;
-    frame->userrsp = (uint64_t)us_stack_top;
-    frame->ss = USER_DATA_SEGMENT;
+    frame->rsp    = base;
+    frame->ss     = KERNEL_DATA_SEGMENT;
 
-    *out_rsp = (uint64_t)frame;
+    *stack_top = (uint64_t)frame;
 }
 
-void _setup_kernel_stack_sched_frame(void* stack_top, uint64_t entry, uint64_t* out_rsp) {
-    KProcessStackFrame* frame =
-        (KProcessStackFrame*)((uint8_t*)stack_top - sizeof(KProcessStackFrame));
+void _build_user_stack_frame(uint64_t** stack_top, uint64_t entry,
+                        uint64_t user_rsp, uint16_t cs, uint16_t ss) {
+    uint64_t base = (uint64_t)*stack_top;
+    ProcessStackFrame* frame =
+        (ProcessStackFrame*)(base - sizeof(ProcessStackFrame));
 
-    memset(frame, 0, sizeof(KProcessStackFrame));
+    memset(frame, 0, sizeof(ProcessStackFrame));
 
-    frame->rip = entry;
-    frame->cs = KERNEL_CODE_SEGMENT;
+    frame->rip    = entry;
+    frame->cs     = cs;
     frame->rflags = 0x202;
+    frame->rsp    = user_rsp;
+    frame->ss     = ss;
 
-    *out_rsp = (uint64_t)frame;
+    *stack_top = (uint64_t*)frame;
 }
 
 Linked_PCB_t* us_task_start(void* entry, char* name, physptr_t page_dir) {
@@ -175,17 +209,15 @@ Linked_PCB_t* us_task_start(void* entry, char* name, physptr_t page_dir) {
 }
 
 Linked_PCB_t* ktask_start(void* entry, char* name) {
-    void* stack = (void*)PAGE_TO_ADDR(page_kalloc(DEFAULT_STACK_PAGE_AMOUNT, PTE_WRITABLE));
-    RET_IF(!stack, 0);
-
-    uint64_t out_rsp;
-
-    _setup_kernel_stack_sched_frame(
-        stack + DEFAULT_STACK_PAGE_BYTES,
-        (uint64_t)entry,
-        &out_rsp
+    void* stack = (void*)page_kalloc(DEFAULT_STACK_PAGE_AMOUNT+1, PTE_WRITABLE);
+    RET_IF(!stack, NULL);
+    uint64_t out_rsp = (uintptr_t)stack + DEFAULT_STACK_PAGE_BYTES;
+    
+    _build_kernel_stack_frame(
+        &out_rsp,
+        (uint64_t)entry  
     );
-
+    Sys_Warning("%p",stack);
     return new_pcb(kernel_pagedir_phys, name, &out_rsp,
         (Stack_t){(uintptr_t)stack, (uintptr_t)stack + DEFAULT_STACK_PAGE_BYTES, DEFAULT_STACK_PAGE_BYTES},
         (Stack_t){0});
@@ -194,6 +226,12 @@ Linked_PCB_t* ktask_start(void* entry, char* name) {
 void* sched_next_process_core(uint64_t saved_rsp) {
     Linked_PCB_t* current = _scheduler_current_process;
     current->k_rsp = saved_rsp;
+
+    static uint32_t _tick = 0;
+    if (++_tick >= SCHED_LOG_INTERVAL) {
+        _tick = 0;
+        _log_all_processes();
+    }
 
     struct hlist_node* next_node = current->list_node.next;
 

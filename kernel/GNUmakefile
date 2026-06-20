@@ -80,7 +80,8 @@ override CPPFLAGS := \
 # Internal nasm flags.
 override NASMFLAGS += \
     -f elf64 \
-    -Wall
+    -Wall \
+    -i src/
 
 # Internal linker flags.
 override LDFLAGS += \

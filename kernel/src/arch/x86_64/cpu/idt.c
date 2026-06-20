@@ -18,7 +18,7 @@ extern void *irq_stub_table[IDT_ENTRIES];
 void irq_dummy_common(uint64_t vec)
 {
     Sys_Warning("unhandled interrupt %lu\n", vec);
-    outb(0x20, 0x20);
+    // outb(0x20, 0x20);
 }
 
 
