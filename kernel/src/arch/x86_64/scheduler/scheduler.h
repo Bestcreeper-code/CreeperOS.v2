@@ -35,25 +35,17 @@ typedef struct Linked_PCB_t {
     struct hlist_node list_node;
 } Linked_PCB_t;
 
-typedef struct __attribute__((packed)) ProcessStackFrame {
+typedef struct __attribute__((packed)) {
     uint64_t r15, r14, r13, r12, r11, r10, r9, r8;
     uint64_t rdi, rsi, rbp, rbx, rdx, rcx, rax;
-
     uint64_t rip;
     uint64_t cs;
     uint64_t rflags;
-    uint64_t userrsp;
+    uint64_t rsp;
     uint64_t ss;
 } ProcessStackFrame;
 
-typedef struct __attribute__((packed)) KProcessStackFrame {
-    uint64_t r15, r14, r13, r12, r11, r10, r9, r8;
-    uint64_t rdi, rsi, rbp, rbx, rdx, rcx, rax;
 
-    uint64_t rip;
-    uint64_t cs;
-    uint64_t rflags;
-} KProcessStackFrame;
 
 extern Linked_PCB_t* _scheduler_current_process;
 extern struct hlist_head _scheduler_process_list_head;
@@ -65,10 +57,13 @@ void* sched_next_process_core(uint64_t saved_rsp);
 
 Linked_PCB_t* new_pcb(physptr_t page_dir, const char* name, uint64_t* rsp, Stack_t k_stack, Stack_t us_stack);
 
-void _setup_user_stack_sched_frame(void* us_stack_top, void* k_stack_top, uint64_t entry, uint64_t* out_rsp);
-void _setup_kernel_stack_sched_frame(void* stack_top, uint64_t entry, uint64_t* out_rsp);
 
 int kill_ktask(Linked_PCB_t* pcb);
+
+
+void _build_kernel_stack_frame(uint64_t* stack_top, uint64_t entry);
+void _build_user_stack_frame(uint64_t** stack_top, uint64_t entry,
+    uint64_t user_rsp, uint16_t cs, uint16_t ss);
 
 Linked_PCB_t* ktask_start(void* entry, char* name);
 Linked_PCB_t* us_task_start(void* entry, char* name, uintptr_t page_dir);

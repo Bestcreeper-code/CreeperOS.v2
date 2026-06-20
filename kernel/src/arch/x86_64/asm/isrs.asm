@@ -140,8 +140,8 @@ isr%1:
 global isr%1
 isr%1:
     cli
-    push qword %1
     push qword 0
+    push qword %1
     SAVE_ALL
     jmp  isr_common_handler
 %endmacro

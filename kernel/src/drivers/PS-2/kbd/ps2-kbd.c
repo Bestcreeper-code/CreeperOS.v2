@@ -229,7 +229,7 @@ int ps2_kbd_read(struct input_device *dev, void *buf, size_t count, loff_t offse
     while (bytes_read < count) {
         unsigned char ch = 0;
         while (ch == 0) {
-            __asm__ __volatile__("sti; hlt");
+            __asm__ __volatile__(" hlt");
             if (buf_head != buf_tail) {
                 ch = input_char_buffer[buf_head];
                 buf_head = (buf_head + 1) % INPUT_CHAR_BUFFER_SIZE;

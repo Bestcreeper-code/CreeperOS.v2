@@ -69,7 +69,7 @@ timer_dev* timer_get_system_time_dev() {
     return slot_system_time.dev;
 }
 
-bool common_timer_dispatcher(timer_registery_id id) {
+bool common_timer_dispatcher(timer_registery_id id, register_t sp) {
     int8_t sid = id;
 
     
@@ -87,7 +87,7 @@ bool common_timer_dispatcher(timer_registery_id id) {
     if (idx >= devices_by_type_count[type])
         return false;
 
-    timer_dev* firing = devices_by_type[type][idx];Sys_log("%lu",firing->freq);
+    timer_dev* firing = devices_by_type[type][idx];
     if (!firing)
         return false;
 
@@ -95,17 +95,17 @@ bool common_timer_dispatcher(timer_registery_id id) {
         firing->reset_interrupt(firing);
 
     if (firing == slot_sleep.dev) {
-        Sys_log("%lu",firing->freq);
+
         if(!firing->freq){
             return false;
         }
         ticks_us += (1000000ULL / firing->freq);
         ticks_ms = ticks_us / 1000;
-        Sys_log("%lx", ticks_us);
+        // Sys_log_NoPos("%lx\n", ticks_us);
     }
 
-    if (firing == slot_sched.dev)
-        _sched_next_process();
+    if (firing == slot_sched.dev && task_switching_flag)
+        yield_core(sp);
 
     return true;
 }

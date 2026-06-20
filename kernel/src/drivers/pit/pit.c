@@ -7,6 +7,7 @@
 #include "drivers/drivers.h"
 #include "memory/memory.h"
 #include "timer/timers.h"
+#include <stddef.h>
 #include <stdint.h>
 
 #define PIT_COMMAND   0x43
@@ -16,18 +17,12 @@
 #define HARDCODED_PIT_INTERRUPT_VECTOR 32
 volatile uint64_t pit_timer_ticks_ms = 0;
 
-static timer_registery_id _pit_timer_device_id;
+timer_registery_id _pit_timer_device_id;
 
 
 
 
-// irq0
-GCC_ATTR((interrupt))
-void timer_irq(void* frame) {
-    pit_timer_ticks_ms++;
-    if(!common_timer_dispatcher(_pit_timer_device_id))
-        outb(0x20, 0x20);
-}
+void pit_isr_entry();
 
 uint64_t pit_gettime() {
     return pit_timer_ticks_ms;
@@ -44,14 +39,21 @@ int pit_init() {
     timer_dev* dev = kmalloc(sizeof(timer_dev));
     if(!dev) return -E_NOMEM;
     dev->name = "PIT";
+    dev->type = TIMER_DEV_PERIODIC;
+    
     dev->freq = 1000;
+
+    dev->enable = NULL;
+    dev->disable = NULL;
+    dev->settime = NULL;
+
     dev->gettime_us = pit_gettime;
     dev->reset_interrupt = pit_reset_int;
     
     dev->vector = HARDCODED_PIT_INTERRUPT_VECTOR;
     
     
-    setup_interrupt_vector(HARDCODED_PIT_INTERRUPT_VECTOR, timer_irq, IRQ_FLAG_INTERRUPT);
+    setup_interrupt_vector(HARDCODED_PIT_INTERRUPT_VECTOR, pit_isr_entry, IRQ_FLAG_INTERRUPT);
     
     uint16_t divisor = 1193180 / PIT_FREQUENCY;
     

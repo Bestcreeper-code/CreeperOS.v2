@@ -1,4 +1,5 @@
 #pragma once
+#include "asm/ams.h"
 #include "time.h"
 #include <stdbool.h>
 #include <stdint.h>
@@ -34,4 +35,4 @@ typedef struct timer_dev {
 
 int8_t timer_register(timer_dev* dev, uint32_t roles, int priority);
 timer_dev* timer_get_system_time_dev();
-bool common_timer_dispatcher(timer_registery_id id);
+bool common_timer_dispatcher(timer_registery_id id, register_t sp);
