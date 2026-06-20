@@ -1,4 +1,4 @@
-#include "Debug/Logger.h"
+#include "debug/Logger.h"
 #include "memory/memory.h"
 #include "vfs/vfs.h"
 
@@ -109,6 +109,7 @@ int kpath_create(struct inode* start, const char* path, umode_t mode, bool excl)
         kfree(newnode->name);
         kfree(newnode);
     }
+    
 
     kfree(copy);
     return ret;
@@ -152,6 +153,9 @@ int kpath_create_force(struct inode* start, const char* path, umode_t mode, bool
             continue;
         }
 
+        char* next_token = strtok_r(NULL, "/", &save);
+        bool is_last = (next_token == NULL);
+
         struct dentry tmp = {
             .name = token,
             .inode = NULL,
@@ -162,7 +166,6 @@ int kpath_create_force(struct inode* start, const char* path, umode_t mode, bool
             curr->inode->i_op->lookup(curr->inode, &tmp, 0);
 
         if (!next) {
-
             struct dentry* newnode = kmalloc(sizeof(struct dentry));
             if (!newnode) {
                 kfree(copy);
@@ -180,11 +183,23 @@ int kpath_create_force(struct inode* start, const char* path, umode_t mode, bool
                 return -E_NOMEM;
             }
 
-            int ret = curr->inode->i_op->mkdir(
-                curr->inode,
-                newnode,
-                S_IFDIR | mode
-            );
+            int ret;
+            if (is_last) {
+
+                ret = curr->inode->i_op->create(
+                    curr->inode,
+                    newnode,
+                    mode,
+                    excl
+                );
+            } else {
+
+                ret = curr->inode->i_op->mkdir(
+                    curr->inode,
+                    newnode,
+                    S_IFDIR | 0755
+                );
+            }
 
             if (ret < 0) {
                 kfree(newnode->name);
@@ -196,8 +211,8 @@ int kpath_create_force(struct inode* start, const char* path, umode_t mode, bool
             next = newnode;
         }
 
-        curr = next;
-        token = strtok_r(NULL, "/", &save);
+        curr  = next;
+        token = next_token;
     }
 
     kfree(copy);

@@ -53,8 +53,4 @@ SECTIONS
 
     _kernel_end = .;
 
-    /DISCARD/ : {
-        *(.eh_frame*)
-        *(.note .note.*)
-    }
 }

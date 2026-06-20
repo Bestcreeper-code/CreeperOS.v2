@@ -16,3 +16,5 @@ int ramfile_open(struct inode* inode, struct file* file);
 ssize_t ramfile_read(struct file *file, char *buf, size_t count, loff_t *offset);
 ssize_t ramfile_write(struct file *file, const char *buf, size_t count, loff_t *offset);
 int ramfile_release(struct inode *inode, struct file *file);
+
+int ramfile_create(const char* path, uintptr_t start, size_t size, umode_t mode, bool fixed_size, bool excl);

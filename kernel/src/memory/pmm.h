@@ -5,6 +5,8 @@
 
 #define PMM_PAGE_SIZE 0x1000ULL
 
+typedef uintptr_t physptr_t;
+
 void pmm_init();
 
 uintptr_t pmm_alloc();

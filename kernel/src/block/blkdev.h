@@ -43,11 +43,11 @@ struct block_device {
     struct list_head list;
 };
 
-struct block_device* Register_Block_Device(const char *name, lsize_t size,
+struct block_device* register_block_device(const char *name, lsize_t size,
     size_t block_size, struct block_device_ops* ops, void *private_data);
 
-int Unregister_Block_Device(struct block_device* blkdev);
+int unregister_block_device(struct block_device* blkdev);
 
-const struct block_device* Get_Block_Device(int id);
+const struct block_device* get_block_device(int id);
 
-int Get_Block_Device_Amount();
+int get_block_device_amount();

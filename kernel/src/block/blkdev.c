@@ -4,6 +4,7 @@
 #include "defines/container_of.h"
 #include "printf/printf.h"
 #include "string/string.h"
+#include "vfs/sysfs.h"
 #include "defines/err_codes.h"
 #include "defines/helpers.h"
 #include "memory/memory.h"      
@@ -18,7 +19,7 @@ size_t _blkdev_id_map[128/ (sizeof(size_t)*8)];
 struct list_head* block_device_list_start;
 short block_device_amount;
 
-struct block_device* Register_Block_Device(const char *name, lsize_t size,
+struct block_device* register_block_device(const char *name, lsize_t size,
     size_t block_size, struct block_device_ops* ops, void *private_data) {
         
     
@@ -59,19 +60,23 @@ struct block_device* Register_Block_Device(const char *name, lsize_t size,
     block_device_list_start->prev = &blkdev->list;
 
     block_device_amount++;
+
 vfs_reg:
-    char* tmpbuff = kmalloc(sizeof("/sys/devices/block/")+strlen(name)-1);
+    char* tmpbuff = kmalloc(sizeof("/sys/devices/block/") + strlen(name));
     RET_IF(!tmpbuff, NULL);
 
     sprintf(tmpbuff, "/sys/devices/block/%s", name);
     kpath_create_force(root_dentry->inode, tmpbuff, S_IFBLK | 0660, false);
+
     
+    sysfs_register_block(blkdev);
+
     scan_disk_mbr_vfs(blkdev);
-    
+
     return blkdev;
 }
 
-int Unregister_Block_Device(struct block_device* blkdev){
+int unregister_block_device(struct block_device* blkdev){
     RET_IF(!blkdev, -1);
 
     if (&blkdev->list == block_device_list_start) {
@@ -91,7 +96,7 @@ int Unregister_Block_Device(struct block_device* blkdev){
     return 0;
 }
 
-const struct block_device* Get_Block_Device(int id) {
+const struct block_device* get_block_device(int id) {
     RET_IF(id < 0, NULL);
 
     struct list_head* current = block_device_list_start;
@@ -105,6 +110,6 @@ const struct block_device* Get_Block_Device(int id) {
     return NULL; 
 }
 
-int Get_Block_Device_Amount(){
+int get_block_device_amount(){
     return block_device_amount;
 }

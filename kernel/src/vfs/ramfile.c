@@ -5,6 +5,7 @@
 #include "defines/err_codes.h"
 #include "string/string.h"
 #include "memops.h"
+#include "vfs/fs.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -113,6 +114,31 @@ int ramfile_release(struct inode *inode, struct file *file)
 
     file->private_data = NULL;
     file->f_ops = NULL;
+
+    return 0;
+}
+
+
+int ramfile_create(const char* path, uintptr_t start, size_t size,
+        umode_t mode, bool fixed_size, bool excl) {
+    RET_IF(!path, -E_INVAL);
+
+    int res = kpath_create_force(root_dentry->inode, path, mode, excl);
+    RET_IF(res < 0, res);
+
+    struct dentry *dentry = kpath_lookup(root_dentry->inode, path);
+    RET_IF(!dentry, -E_NOENT);
+    RET_IF(!dentry->inode, -E_NOENT);
+
+    struct ramfile_info *info = kmalloc(sizeof(struct ramfile_info));
+    RET_IF(!info, -E_NOMEM);
+
+    info->start = start;
+    info->size = size;
+    info->fixed_size = fixed_size;
+
+    dentry->inode->i_private = info;
+    dentry->inode->i_fop = &ram_file_fops;
 
     return 0;
 }

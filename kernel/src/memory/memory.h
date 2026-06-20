@@ -1,7 +1,7 @@
 #pragma once
 #include <stdint.h>
 #include <stddef.h>
-#include "Debug/Logger.h"
+#include "debug/Logger.h"
 #include "config.h"
 // #include "kernel_data.h"
 

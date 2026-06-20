@@ -1,6 +1,6 @@
 #include "cpu.h"
 
-#include "Debug/Logger.h"
+#include "debug/Logger.h"
 #include "arch/x86_64/cpu/idt.h"
 #include "string/format.h"
 #include "string/string.h"
@@ -335,7 +335,4 @@ void register_cpu_exceptions(){
     idt_set_gate(31, (uintptr_t)isr31, 0x08, 0x8E);  idt_set_allocated(31);
 
     
-    void irq_dummy_handler();
-    for (int i = 32; i < 48; i++)
-        idt_set_gate(i, (uintptr_t)irq_dummy_handler, 0x08, 0x8E);
 }

@@ -4,10 +4,11 @@
 #include <limine.h>
 #include "arch/arch.h"
 #include "asm/ams.h"
+#include "defines/types.h"
 #include "drivers/drivers.h"
 #include "initrd_parse/initrd.h"
 #include "string/string.h"
-#include "Debug/Logger.h"
+#include "debug/Logger.h"
 #include "memory/pmm.h"
 #include "memops.h"
 #include "arch/vmm.h"
@@ -87,16 +88,19 @@ void _kstart() {
 }
 
 void kmain() {
-    sti();
+    cli();
     
     core_init();
-    initrd_init();
-    // #error fzjifhzoeuhfouzehofuo initrf #pf
-    dev_init();
     sysfs_init();
+    // fs_init();
+    initrd_init();
+    
+    dev_init();
+
+    sti();    
+    
     tree(root_dentry, 0);
     
-    // fs_init();
     // late_init();
     // We're done, just hang...
     Sys_Warning("Kernel reached halt\n");

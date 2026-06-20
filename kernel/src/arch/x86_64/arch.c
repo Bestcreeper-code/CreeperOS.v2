@@ -1,6 +1,6 @@
 #include "arch/arch.h"
-#include "Debug/Logger.h"
-#include "Debug/panic.h"
+#include "debug/Logger.h"
+#include "debug/panic.h"
 #include "arch/vmm.h"
 #include "asm/ams.h"
 #include "defines/compiler_defs.h"

@@ -1,6 +1,6 @@
 #include "pmm.h"
-#include "Debug/Logger.h"
-#include "Debug/panic.h"
+#include "debug/Logger.h"
+#include "debug/panic.h"
 #include "memops.h"
 #include <stdint.h>
 #include <stddef.h>

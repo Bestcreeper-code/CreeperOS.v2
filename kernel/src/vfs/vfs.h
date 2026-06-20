@@ -58,13 +58,13 @@ enum file_flag {
     O_CREAT     = 0x10
 };
 
-struct file {
+typedef struct file {
     struct inode *f_inode;          // points to the file/directory inode
     loff_t f_pos;                   // current file position (for read/write)
     uint32_t f_flags;           // O_RDONLY, O_WRONLY, etc.
     void *private_data;             // filesystem-specific data
     const struct file_operations *f_ops; // pointer to file operations
-};
+} file;
 
 
 struct file_operations {
@@ -132,7 +132,7 @@ struct inode {
     void *i_private;
 };
 
-struct dentry {
+typedef struct dentry {
     char *name;
     struct dentry *parent;   // parent directory
     struct inode *inode;     // target (NULL = negative dentry)
@@ -141,7 +141,7 @@ struct dentry {
     struct hlist_head d_children;
 
     atomic_uint d_count;
-};
+} dentry;
 
 
 
@@ -151,3 +151,5 @@ extern struct dentry* root_dentry;
 struct dentry *vfs_lookup(struct inode* dir, struct dentry* file, unsigned int flags);
 int vfs_create(struct inode *dir, struct dentry *dentry, umode_t mode, bool excl);
 int vfs_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode);
+
+int vfs_inv_func();

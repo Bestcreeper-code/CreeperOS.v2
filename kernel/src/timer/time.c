@@ -1,29 +1,33 @@
-
 #include "time.h"
-#include "Debug/Logger.h"
+#include "timers.h"
 #include "asm/ams.h"
-#include <stddef.h>
 #include <stdint.h>
 
-static uint64_t (*curr_timer_ms)() = NULL;
-static int active_priority = -1;
+extern volatile uint64_t ticks_ms;
+extern volatile uint64_t ticks_us;
 
-void timer_register(uint64_t (*get_ticks_ms)(), int priority) {
-    if (priority > active_priority) {
-        curr_timer_ms = get_ticks_ms;
-        active_priority = priority;
-        Sys_Info("kernel timer switched to %p (prio:%u)\n", get_ticks_ms, priority);
-    }
-}
+
 
 uint64_t timer_get_ms() {
-    if (!curr_timer_ms) return 0;
-    return curr_timer_ms();
+    timer_dev *sys = timer_get_system_time_dev();
+    if (sys) return sys->gettime_us(sys) / 1000000ULL;
+    return ticks_ms;
+}
+
+uint64_t timer_get_us() {
+    timer_dev *sys = timer_get_system_time_dev();
+    if (sys) return sys->gettime_us(sys) / 1000ULL;
+    return ticks_us;
 }
 
 void sleep_ms(uint64_t ms) {
     uint64_t target = timer_get_ms() + ms;
-    while (timer_get_ms() < target) {
+    while (timer_get_ms() < target)
         hlt();
-    }
+}
+
+void sleep_us(uint64_t us) {
+    uint64_t target = timer_get_us() + us;
+    while (timer_get_us() < target)
+        hlt();
 }
