@@ -1,9 +1,11 @@
 #include "memory/memory.h"
 
+#include "arch/locks.h"
 #include "arch/vmm.h"
 #include "drivers/drivers.h"
 #include "memory/pmm.h"
 #include "memops.h"
+#include "scheduler/scheduler.h"
 
 
 
@@ -13,9 +15,18 @@ free_region_map_t *k_mmap = &region_map;
 
 static inline free_region_map_t *get_free_region_map() { return k_mmap; }
 
+static uint64_t heap_lock;
+static inline void heap_lock_acquire() {
+    int spins = 0;
+    while (!try_acquire_lock(&heap_lock, 0)) {
+        if (++spins > 100) { _yield(); spins = 0; }
+    }
+}
+static inline void heap_lock_release() { release_lock(&heap_lock, 0); }
 
+static void force_free_nolock(uintptr_t address, size_t size);
 
-void force_alloc(uintptr_t address, size_t size) {
+static void force_alloc_nolock(uintptr_t address, size_t size) {
     free_region_map_t *k_mmap = get_free_region_map();
     uintptr_t end       = address + size;
     size_t    page_size = PMM_PAGE_SIZE;
@@ -28,10 +39,10 @@ void force_alloc(uintptr_t address, size_t size) {
         uintptr_t page_end   = page_addr + page_size;
 
         if (address > page_start)
-            force_free(page_start, address - page_start);
+            force_free_nolock(page_start, address - page_start);
 
         if (end < page_end)
-            force_free(end, page_end - end);
+            force_free_nolock(end, page_end - end);
     }
 
     uintptr_t lock_end = end;
@@ -78,7 +89,13 @@ void force_alloc(uintptr_t address, size_t size) {
     }
 }
 
-void force_free(uintptr_t address, size_t size) {
+void force_alloc(uintptr_t address, size_t size) {
+    heap_lock_acquire();
+    force_alloc_nolock(address, size);
+    heap_lock_release();
+}
+
+static void force_free_nolock(uintptr_t address, size_t size) {
     free_region_map_t *k_mmap = get_free_region_map();
 
     uintptr_t new_start = address & ~0xFFFU;
@@ -132,6 +149,12 @@ void force_free(uintptr_t address, size_t size) {
         k_mmap->free_regions[k_mmap->free_region_count].length    = new_end - new_start;
         k_mmap->free_region_count++;
     }
+}
+
+void force_free(uintptr_t address, size_t size) {
+    heap_lock_acquire();
+    force_free_nolock(address, size);
+    heap_lock_release();
 }
 
 
@@ -217,6 +240,7 @@ free_region_t *FirstRegionOfSizeOrMore(size_t size) {
 }
 
 void print_free_regions() {
+    heap_lock_acquire();
     free_region_map_t *k_mmap = get_free_region_map();
     Sys_log("Free regions:\n");
     for (int i = 0; i < MAX_FREE_REGIONS; i++) {
@@ -227,6 +251,7 @@ void print_free_regions() {
                     k_mmap->free_regions[i].length);
         }
     }
+    heap_lock_release();
 }
 
 uintptr_t get_pter_size(void *pter) {
@@ -242,30 +267,31 @@ void *kmalloc_impl(size_t size) {
     Sys_log("[MEM_DBG] kmalloc(%zu)\n", size);
 #endif
     if (size == 0) return NULL;
+    if (size > SIZE_MAX - sizeof(uintptr_t)) return NULL;
+
+    heap_lock_acquire();
 
     free_region_map_t *k_mmap = get_free_region_map();
-    if (!k_mmap) return NULL;
-
-    if (size > SIZE_MAX - sizeof(uintptr_t)) return NULL;
+    void *result = NULL;
     size_t full_size = (size + sizeof(uintptr_t) + 7) & ~7U;
 
     free_region_t *region = FirstRegionOfSizeOrMore(full_size);
 
     if (!region || region->base_addr <= 0xFFFF) {
-        
+
         size_t pages_needed = (full_size + PMM_PAGE_SIZE - 1) / PMM_PAGE_SIZE;
 
         uintptr_t pa = pmm_alloc_pages_zeroed(pages_needed);
         if (!pa) {
             Sys_Error("kmalloc: pmm_alloc_pages_zeroed(%zu) failed\n", pages_needed);
-            return NULL;
+            goto out;
         }
 
         uintptr_t va = kvma_alloc(pages_needed);
         if (!va) {
             pmm_free_pages(pa, pages_needed);
             Sys_Error("kmalloc: kvma_alloc(%zu) failed\n", pages_needed);
-            return NULL;
+            goto out;
         }
 
         uint64_t *pml4 = (uint64_t *)PHYS_2_HHDM(kernel_pagedir_phys);
@@ -275,40 +301,49 @@ void *kmalloc_impl(size_t size) {
                    pa + i * PMM_PAGE_SIZE,
                    PTE_PRESENT | PTE_WRITABLE);
 
-        force_free(va, pages_needed * PMM_PAGE_SIZE);
+        force_free_nolock(va, pages_needed * PMM_PAGE_SIZE);
         region = FirstRegionOfSizeOrMore(full_size);
     }
 
     if (!region || region->base_addr <= 0xFFFF) {
         Sys_Error("kmalloc: still no usable region after expansion\n");
-        return NULL;
+        goto out;
     }
 
-    uintptr_t *header = (uintptr_t *)region->base_addr;
-    *header = (uintptr_t)size;
+    {
+        uintptr_t *header = (uintptr_t *)region->base_addr;
+        *header = (uintptr_t)size;
 
-    region->base_addr += full_size;
-    region->length    -= full_size;
+        region->base_addr += full_size;
+        region->length    -= full_size;
 
-    if (region->length == 0) {
-        int idx = (int)(region - k_mmap->free_regions);
-        for (int i = idx; i < k_mmap->free_region_count - 1; i++)
-            k_mmap->free_regions[i] = k_mmap->free_regions[i + 1];
-        k_mmap->free_region_count--;
-    }
+        if (region->length == 0) {
+            int idx = (int)(region - k_mmap->free_regions);
+            for (int i = idx; i < k_mmap->free_region_count - 1; i++)
+                k_mmap->free_regions[i] = k_mmap->free_regions[i + 1];
+            k_mmap->free_region_count--;
+        }
 
 #if MEM_DEBUG
-    Sys_log("[MEM_DBG] kmalloc -> %p (%zu bytes)\n", header + 1, full_size);
+        Sys_log("[MEM_DBG] kmalloc -> %p (%zu bytes)\n", header + 1, full_size);
 #endif
-    return (void *)(header + 1);
+        result = (void *)(header + 1);
+    }
+
+out:
+    heap_lock_release();
+    return result;
 }
 
 
 
 void kfree_impl(void *_Memory) {
+    if (!_Memory) return;
 #if MEM_DEBUG
     Sys_log("[MEM_DBG] kfree(%p)\n", _Memory);
 #endif
+    heap_lock_acquire();
+
     free_region_map_t *k_mmap = get_free_region_map();
 
     uintptr_t  address = (uintptr_t)_Memory;
@@ -316,15 +351,23 @@ void kfree_impl(void *_Memory) {
     size_t     size    = *sizeptr + sizeof(uintptr_t);
     size = (size + 7) & ~7U;
 
+    int placed = 0;
     for (int i = 0; i < MAX_FREE_REGIONS; i++) {
         if (k_mmap->free_regions[i].length == 0) {
             k_mmap->free_regions[i].base_addr = address - sizeof(uintptr_t);
             k_mmap->free_regions[i].length    = size;
+            placed = 1;
 #if MEM_DEBUG
             Sys_log("[MEM_DBG] kfree: returned %zu bytes at %p\n", size, _Memory);
 #endif
             break;
         }
+    }
+
+    if (!placed) {
+        Sys_Error("kfree: free_regions[] exhausted, leaking %zu bytes at %p\n", size, _Memory);
+        heap_lock_release();
+        return;
     }
 
 #ifndef FREE_MERGES_MMAP_BLOCKS
@@ -364,6 +407,8 @@ void kfree_impl(void *_Memory) {
         if (k_mmap->free_regions[i].length > 0)
             k_mmap->free_region_count++;
     }
+
+    heap_lock_release();
 }
 
 

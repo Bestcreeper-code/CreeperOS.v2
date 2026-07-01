@@ -1,6 +1,6 @@
 #include "arch/rtc.h"
 
-#include "asm/ams.h"
+#include "asm/asm.h"
 #include "drivers/drivers.h"
 #include <stdint.h>
 #include <stdbool.h>

@@ -4,3 +4,6 @@
 [submodule "kernel/src/Flanterm"]
 	path = kernel/src/Flanterm
 	url = https://github.com/Mintsuki/Flanterm.git
+[submodule "kernel/src/uACPI"]
+	path = kernel/src/uACPI
+	url = https://github.com/uACPI/uACPI.git

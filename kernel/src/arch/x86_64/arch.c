@@ -1,8 +1,9 @@
 #include "arch/arch.h"
+#include "arch/x86_64/interrupts/apic.h"
 #include "debug/Logger.h"
 #include "debug/panic.h"
 #include "arch/vmm.h"
-#include "asm/ams.h"
+#include "asm/asm.h"
 #include "defines/compiler_defs.h"
 #include "interrupts/pic.h"
 #include "cpu/cpu.h"
@@ -18,10 +19,13 @@ void arch_init(){
     Sys_log("Entering arch init\n");
     register_cpu_features();
 
-    pic_remap();
-
+    
     init_gdt();
     idt_init();
+    
+    pic_remap();
+    lapic_init();
+
     register_cpu_exceptions();
 
     //mem

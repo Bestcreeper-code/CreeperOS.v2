@@ -1,4 +1,5 @@
 #include "requests.h"
+#include "limine.h"
 
 
 
@@ -28,6 +29,24 @@ volatile struct limine_memmap_request memmap_request = {
     .id = LIMINE_MEMMAP_REQUEST_ID,
     .revision = 0
 };
+
+__attribute__((used, section(".limine_requests")))
+volatile struct limine_flanterm_fb_init_params_request flanterm_request = {
+    .id = LIMINE_FLANTERM_FB_INIT_PARAMS_REQUEST_ID,
+    .revision = 0
+};
+
+__attribute__((used, section(".limine_requests")))
+volatile struct limine_mp_request mp_request = {
+    .id = LIMINE_MP_REQUEST_ID,
+    .revision = 0
+};
+__attribute__((used, section(".limine_requests")))
+volatile struct limine_rsdp_request rsdp_request = {
+    .id = LIMINE_RSDP_REQUEST_ID,
+    .revision = 0
+};
+
 
 __attribute__((used, section(".limine_requests_start")))
 volatile uint64_t limine_requests_start_marker[] = LIMINE_REQUESTS_START_MARKER;

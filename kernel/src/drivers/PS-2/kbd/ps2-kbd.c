@@ -1,7 +1,7 @@
 #include "debug/Logger.h"
 #include "arch/interrupts.h"
 #include "arch/x86_64/cpu/idt.h"
-#include "asm/ams.h"
+#include "asm/asm.h"
 #include "defines/compiler_defs.h"
 #include "ps2-kbd.h"
 #include "input/input.h"
@@ -253,21 +253,21 @@ int ps2_kbd_init() {
     setup_interrupt_vector(HARDCODED_PS2_KBD_INTERRUPT_VECTOR_INDEX, ps2_keyboard_handler, IRQ_FLAG_INTERRUPT);
 
     
-    
     outb(0x64, 0xAE);//enable kbd port
     
     
     outb(0x60, 0xF4);//enable scanning
     
         
-    // while (!(inb(0x64) & 0x01));
+    while (!(inb(0x64) & 0x01));
     uint8_t ack = inb(0x60);
-    Sys_Info("ACK: %02x\n", ack);
     
+    Sys_Info("ACK: %02x\n", ack);
     uint8_t master_mask = inb(0x21);
     master_mask &= ~(1 << 1);
     outb(0x21, master_mask);
-
+    
+    
     if(register_input_device(
         "PS/2 Keyboard",
         &ps2_kbd_ops,

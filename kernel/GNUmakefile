@@ -2,6 +2,7 @@
 
 override OUTPUT := kernel
 
+ARCH := x86_64
 
 PREFIX := /usr/local
 
@@ -72,6 +73,8 @@ override CFLAGS += \
 override CPPFLAGS := \
     -I src \
     -I limine-protocol/include \
+    -I src/uACPI/include \
+    -I src/arch/$(ARCH)/ \
     -isystem freestanding-c-hdrs/include \
     -isystem $(shell $(CC) -print-file-name=include) \
     $(CPPFLAGS) \

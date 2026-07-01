@@ -2,7 +2,7 @@
 
 #include "debug/Logger.h"
 #include "timer/time.h"
-#include "asm/ams.h"
+#include "asm/asm.h"
 #include "memops.h"
 #include "printf/printf.h"
 #include <stddef.h>
@@ -32,7 +32,7 @@ static const char* crash_messages[] = {
     "Page Fault",                        // 14
     "Reserved",                          // 15
 
-    // x87 / SIMD / CPU-specific
+
     "x87 Floating-Point Exception",      // 16
     "Alignment Check",                   // 17
     "Machine Check",                     // 18
@@ -40,7 +40,7 @@ static const char* crash_messages[] = {
     "Virtualization Exception",          // 20
     "Control Protection Exception",      // 21
 
-    // Reserved / Unknown
+
     "Reserved",                          // 22
     "Reserved",                          // 23
     "Reserved",                          // 24
@@ -48,18 +48,18 @@ static const char* crash_messages[] = {
     "Reserved",                          // 26
     "Reserved",                          // 27
 
-    // Hypervisor
+
     "Hypervisor Injection Exception",    // 28
     "VMM Communication Exception",       // 29
 
-    // Security / Other
+
     "Security Exception",                // 30
     "Reserved"                           // 31
 };
 
 
 enum CrashType {
-    // CPU Exceptions
+
     CRASH_DIVIDE_BY_ZERO = 0,           // 0
     CRASH_DEBUG_EXCEPTION,              // 1
     CRASH_NMI,                          // 2 Non-Maskable Interrupt
@@ -77,7 +77,7 @@ enum CrashType {
     CRASH_PAGE_FAULT,                   // 14
     CRASH_RESERVED_15,                  // 15
 
-    // x87 / SIMD / CPU-specific Exceptions
+
     CRASH_X87_FPU_EXCEPTION,            // 16
     CRASH_ALIGNMENT_CHECK,              // 17
     CRASH_MACHINE_CHECK,                // 18
@@ -85,7 +85,7 @@ enum CrashType {
     CRASH_VIRTUALIZATION_EXCEPTION,     // 20
     CRASH_CONTROL_PROTECTION_EXCEPTION, // 21
 
-    // Reserved / Unknown
+
     CRASH_RESERVED_22,                  // 22
     CRASH_RESERVED_23,                  // 23
     CRASH_RESERVED_24,                  // 24
@@ -93,11 +93,11 @@ enum CrashType {
     CRASH_RESERVED_26,                  // 26
     CRASH_RESERVED_27,                  // 27
 
-    // Hypervisor
+
     CRASH_HYPERVISOR_INJECTION,         // 28
     CRASH_VMM_COMMUNICATION,            // 29
 
-    // Security / Other
+
     CRASH_SECURITY_EXCEPTION,           // 30
     CRASH_RESERVED_31,                  // 31
 

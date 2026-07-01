@@ -14,7 +14,7 @@
 short hfp;
 
 
-char ecx_cpuid_1_flags[][32] = {
+char ecx_cpuid_1_flags[][16] = {
     "SSE3"       ,
     "PCLMUL"     ,
     "DTES64"     ,
@@ -50,7 +50,7 @@ char ecx_cpuid_1_flags[][32] = {
 };
 
 
-char edx_cpuid_1_flags[][32]= {
+char edx_cpuid_1_flags[][8]= {
     "FPU"        ,
     "VME"        ,
     "DE"         ,
@@ -85,7 +85,7 @@ char edx_cpuid_1_flags[][32]= {
     "PBE"               
 };
 
-char ebx_cpuid_7_flags[][32] = {
+char ebx_cpuid_7_flags[][16] = {
     "FSGSBASE",
     "TSC_ADJUST",
     "SGX",
@@ -335,4 +335,4 @@ void register_cpu_exceptions(){
     idt_set_gate(31, (uintptr_t)isr31, 0x08, 0x8E);  idt_set_allocated(31);
 
     
-}
+}   

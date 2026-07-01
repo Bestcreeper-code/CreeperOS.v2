@@ -1,7 +1,7 @@
 #include "arch/x86_64/cpu/idt.h"
 #include "debug/Logger.h"
 #include "arch/interrupts.h"
-#include "asm/ams.h"
+#include "asm/asm.h"
 #include "defines/compiler_defs.h"
 #include "defines/helpers.h"
 #include "memops.h"
@@ -18,7 +18,7 @@ extern void *irq_stub_table[IDT_ENTRIES];
 void irq_dummy_common(uint64_t vec)
 {
     Sys_Warning("unhandled interrupt %lu\n", vec);
-    // outb(0x20, 0x20);
+    outb(0x20, 0x20);
 }
 
 
@@ -53,8 +53,6 @@ void idt_set_gate(uint8_t num, uintptr_t base, uint16_t sel, uint8_t flags)
     idt[num].offset_16_31 = (base >> 16) & 0xFFFF;
     idt[num].offset_32_63 = (uint32_t)(base >> 32);
     idt[num].reserved     = 0;
-
-    idt_flush((uint64_t)(uintptr_t)&idt_reg);
 }
 
 void idt_init(void)
