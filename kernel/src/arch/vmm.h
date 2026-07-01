@@ -1,24 +1,13 @@
 #pragma once
 #include <stdint.h>
 #include <stddef.h>
-
-#define PTE_PRESENT   (1ULL << 0)
-#define PTE_WRITABLE  (1ULL << 1)
-#define PTE_USER      (1ULL << 2)
-#define PTE_HUGE      (1ULL << 7)
-#define PTE_GLOBAL    (1ULL << 8)
-#define PTE_NX        (1ULL << 63)
+#include "mm/vmm_arch.h"
 
 #define PTE_ADDR_MASK 0x000FFFFFFFFFF000ULL
 
 #define PAGE_SIZE_4K  0x1000ULL
 #define PAGE_SIZE_2M  0x200000ULL
 #define PAGE_SIZE_1G  0x40000000ULL
-
-#define PML4_INDEX(a) (((a) >> 39) & 0x1FF)
-#define PDPT_INDEX(a) (((a) >> 30) & 0x1FF)
-#define PD_INDEX(a)   (((a) >> 21) & 0x1FF)
-#define PT_INDEX(a)   (((a) >> 12) & 0x1FF)
 
 #define HHDM_VBASE 0xFFFF800000000000ULL
 

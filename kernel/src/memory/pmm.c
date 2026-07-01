@@ -2,13 +2,22 @@
 #include "debug/Logger.h"
 #include "debug/panic.h"
 #include "memops.h"
+#include "arch/locks.h"
+#include <stdatomic.h>
 #include <stdint.h>
 #include <stddef.h>
 #include <limine.h>
 extern struct limine_hhdm_request hhdm_request;
 extern struct limine_memmap_request memmap_request;
 
+uint64_t pmm_lock;
 
+static inline void pmm_lock_acquire(){
+    acquire_lock(&pmm_lock, 0);
+}
+static inline void pmm_lock_release(){
+    release_lock(&pmm_lock, 0);
+}
 
 static inline void *phys_to_virt(uintptr_t phys) {
     return (void *)(phys + hhdm_request.response->offset);
@@ -19,7 +28,7 @@ static size_t bitmap_bits;
 static size_t bitmap_next = 0;
 
 static size_t total_pages;
-static size_t free_pages;
+static atomic_size_t free_pages;
 
 static inline void bitmap_set(size_t bit) {
     bitmap[bit >> 3] |= (1u << (bit & 7));
@@ -117,11 +126,15 @@ void pmm_init() {
 }
 
 uintptr_t pmm_alloc() {
+    pmm_lock_acquire();
+
     size_t bit = bitmap_find_clear();
     if (bit == SIZE_MAX) panic("pmm: out of memory");
-
+    
     bitmap_set(bit);
     free_pages--;
+
+    pmm_lock_release();
     return (uintptr_t)bit * PMM_PAGE_SIZE;
 }
 
@@ -132,11 +145,15 @@ uintptr_t pmm_alloc_zeroed() {
 }
 
 void pmm_free(uintptr_t phys) {
+    pmm_lock_acquire();
+
     size_t bit = (size_t)(phys / PMM_PAGE_SIZE);
     if (bitmap_test(bit)) {
         bitmap_clear(bit);
         free_pages++;
     }
+
+    pmm_lock_release();
 }
 
 
@@ -144,12 +161,16 @@ uintptr_t pmm_alloc_pages(size_t count) {
     if (count == 0) return 0;
     if (count == 1) return pmm_alloc();  // fast path
 
+    pmm_lock_acquire();
+
     size_t bit = bitmap_find_clear_range(count);
     if (bit == SIZE_MAX) panic("pmm: out of memory");
-
+    
     for (size_t i = 0; i < count; i++)
-        bitmap_set(bit + i);
+    bitmap_set(bit + i);
     free_pages -= count;
+
+    pmm_lock_release();
 
     return (uintptr_t)bit * PMM_PAGE_SIZE;
 }
@@ -161,10 +182,15 @@ uintptr_t pmm_alloc_pages_zeroed(size_t count) {
 }
 
 void pmm_free_pages(uintptr_t phys, size_t count) {
+
+    pmm_lock_acquire();
+    
     size_t bit = phys / PMM_PAGE_SIZE;
     for (size_t i = 0; i < count; i++)
-        bitmap_clear(bit + i);
+    bitmap_clear(bit + i);
     free_pages += count;
+
+    pmm_lock_release();
 }
 
 size_t pmm_get_total_pages() {

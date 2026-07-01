@@ -50,6 +50,8 @@
 
 void serial_init();
 
+void log_queue_init();
+void _log_manager_thread();
 
 void serial_write_char(char c);
 void serial_write_string(const char* str);
@@ -58,6 +60,9 @@ void serial_log_hex(const char* label, uint32_t val);
 void sys_serial_vlogf(const char* format, const char* file,
     const char* func, int line, va_list args);
 void sys_serial_logf(const char* frmt, const char* file, const char* func, int line, ...) __attribute__ ((format (printf, 1, 5)));
+
+
+
 
 typedef enum {
     

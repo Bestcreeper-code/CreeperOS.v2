@@ -1,11 +1,13 @@
 #include "arch/vmm.h"
 #include "debug/Logger.h"
 #include "debug/panic.h"
-#include "asm/ams.h"
+#include "asm/asm.h"
 #include "defines/container_of.h"
 #include "memory/pmm.h"
 #include "printf/printf.h"
 #include "requests.h"
+#include "arch/locks.h"
+#include "scheduler/scheduler.h"
 
 #include <stdint.h>
 #include <stddef.h>
@@ -13,12 +15,38 @@
 #include <cpuid.h>
 #include <limine.h>
 
+
+
+#define PML4_INDEX(a) (((a) >> 39) & 0x1FF)
+#define PDPT_INDEX(a) (((a) >> 30) & 0x1FF)
+#define PD_INDEX(a)   (((a) >> 21) & 0x1FF)
+#define PT_INDEX(a)   (((a) >> 12) & 0x1FF)
+
+
 extern char _kernel_start[];
 extern char _kernel_end[];
 
 
 volatile uintptr_t hhdm_offset = 0;
 uintptr_t kernel_pagedir_phys = 0;
+
+static uint64_t vmm_lock;
+static inline void vmm_lock_acquire() {
+    int spins = 0;
+    while (!try_acquire_lock(&vmm_lock, 0)) {
+        if (++spins > 100) { _yield(); spins = 0; }
+    }
+}
+static inline void vmm_lock_release() { release_lock(&vmm_lock, 0); }
+
+static uint64_t kvma_lock;
+static inline void kvma_lock_acquire() {
+    int spins = 0;
+    while (!try_acquire_lock(&kvma_lock, 0)) {
+        if (++spins > 100) { _yield(); spins = 0; }
+    }
+}
+static inline void kvma_lock_release() { release_lock(&kvma_lock, 0); }
 
 
 static inline uint64_t *phys_to_boot_virt(uintptr_t phys) {
@@ -32,7 +60,7 @@ static inline int cpu_has_1gb_pages() {
 }
 
 static uint64_t *table_get_or_create(uint64_t *table, size_t idx) {
-    if (!(table[idx] & PTE_PRESENT)) {//<<<
+    if (!(table[idx] & PTE_PRESENT)) {
         uintptr_t phys = pmm_alloc_zeroed();
         table[idx] = (phys & PTE_ADDR_MASK) | PTE_PRESENT | PTE_WRITABLE;
     }
@@ -41,22 +69,40 @@ static uint64_t *table_get_or_create(uint64_t *table, size_t idx) {
     return (uint64_t *)((table[idx] & PTE_ADDR_MASK) + offset);
 }
 
-void map_4k(uint64_t *pml4, uintptr_t va, uintptr_t pa, uint64_t flags) {
-    uint64_t *pdpt = table_get_or_create(pml4, PML4_INDEX(va));//<<
+static void map_4k_nolock(uint64_t *pml4, uintptr_t va, uintptr_t pa, uint64_t flags) {
+    uint64_t *pdpt = table_get_or_create(pml4, PML4_INDEX(va));
     uint64_t *pd   = table_get_or_create(pdpt, PDPT_INDEX(va));
     uint64_t *pt   = table_get_or_create(pd,   PD_INDEX(va));
     pt[PT_INDEX(va)] = (pa & PTE_ADDR_MASK) | flags | PTE_PRESENT;
 }
 
-void map_2m(uint64_t *pml4, uintptr_t va, uintptr_t pa, uint64_t flags) {
+void map_4k(uint64_t *pml4, uintptr_t va, uintptr_t pa, uint64_t flags) {
+    vmm_lock_acquire();
+    map_4k_nolock(pml4, va, pa, flags);
+    vmm_lock_release();
+}
+
+static void map_2m_nolock(uint64_t *pml4, uintptr_t va, uintptr_t pa, uint64_t flags) {
     uint64_t *pdpt = table_get_or_create(pml4, PML4_INDEX(va));
     uint64_t *pd   = table_get_or_create(pdpt, PDPT_INDEX(va));
     pd[PD_INDEX(va)] = (pa & PTE_ADDR_MASK) | flags | PTE_HUGE | PTE_PRESENT;
 }
 
-void map_1g(uint64_t *pml4, uintptr_t va, uintptr_t pa, uint64_t flags) {
+void map_2m(uint64_t *pml4, uintptr_t va, uintptr_t pa, uint64_t flags) {
+    vmm_lock_acquire();
+    map_2m_nolock(pml4, va, pa, flags);
+    vmm_lock_release();
+}
+
+static void map_1g_nolock(uint64_t *pml4, uintptr_t va, uintptr_t pa, uint64_t flags) {
     uint64_t *pdpt = table_get_or_create(pml4, PML4_INDEX(va));
     pdpt[PDPT_INDEX(va)] = (pa & PTE_ADDR_MASK) | flags | PTE_HUGE | PTE_PRESENT;
+}
+
+void map_1g(uint64_t *pml4, uintptr_t va, uintptr_t pa, uint64_t flags) {
+    vmm_lock_acquire();
+    map_1g_nolock(pml4, va, pa, flags);
+    vmm_lock_release();
 }
 
 static void hhdm_check_coverage() {
@@ -120,29 +166,39 @@ void hhdm_init() {
 }
 
 uintptr_t vmm_virt_to_phys(uintptr_t vaddr) {
+    vmm_lock_acquire();
+
     uintptr_t cr3 = cr3_get();
 
     uint64_t *pml4 = (uint64_t *)(cr3 + hhdm_offset);
     uint64_t pdpt_e = pml4[PML4_INDEX(vaddr)];
-    if (!(pdpt_e & PTE_PRESENT)) return UINTPTR_MAX;
+    if (!(pdpt_e & PTE_PRESENT)) { vmm_lock_release(); return UINTPTR_MAX; }
 
     uint64_t *pdpt = (uint64_t *)((pdpt_e & PTE_ADDR_MASK) + hhdm_offset);
     uint64_t pd_e = pdpt[PDPT_INDEX(vaddr)];
-    if (!(pd_e & PTE_PRESENT)) return UINTPTR_MAX;
-    if (pd_e & PTE_HUGE)
-        return (pd_e & PTE_ADDR_MASK) | (vaddr & (PAGE_SIZE_1G - 1));
+    if (!(pd_e & PTE_PRESENT)) { vmm_lock_release(); return UINTPTR_MAX; }
+    if (pd_e & PTE_HUGE) {
+        uintptr_t result = (pd_e & PTE_ADDR_MASK) | (vaddr & (PAGE_SIZE_1G - 1));
+        vmm_lock_release();
+        return result;
+    }
 
     uint64_t *pd = (uint64_t *)((pd_e & PTE_ADDR_MASK) + hhdm_offset);
     uint64_t pt_e = pd[PD_INDEX(vaddr)];
-    if (!(pt_e & PTE_PRESENT)) return UINTPTR_MAX;
-    if (pt_e & PTE_HUGE)
-        return (pt_e & PTE_ADDR_MASK) | (vaddr & (PAGE_SIZE_2M - 1));
+    if (!(pt_e & PTE_PRESENT)) { vmm_lock_release(); return UINTPTR_MAX; }
+    if (pt_e & PTE_HUGE) {
+        uintptr_t result = (pt_e & PTE_ADDR_MASK) | (vaddr & (PAGE_SIZE_2M - 1));
+        vmm_lock_release();
+        return result;
+    }
 
     uint64_t *pt = (uint64_t *)((pt_e & PTE_ADDR_MASK) + hhdm_offset);
     uint64_t page_e = pt[PT_INDEX(vaddr)];
-    if (!(page_e & PTE_PRESENT)) return UINTPTR_MAX;
+    if (!(page_e & PTE_PRESENT)) { vmm_lock_release(); return UINTPTR_MAX; }
 
-    return (page_e & PTE_ADDR_MASK) | (vaddr & (PAGE_SIZE_4K - 1));
+    uintptr_t result = (page_e & PTE_ADDR_MASK) | (vaddr & (PAGE_SIZE_4K - 1));
+    vmm_lock_release();
+    return result;
 }
 
 static uint64_t *get_current_pml4() {
@@ -151,8 +207,10 @@ static uint64_t *get_current_pml4() {
 }
 
 void vmm_map_page(uintptr_t va, uintptr_t pa, uint64_t flags) {
-    map_4k(get_current_pml4(), va, pa, flags);
+    vmm_lock_acquire();
+    map_4k_nolock(get_current_pml4(), va, pa, flags);
     invlpg(va);
+    vmm_lock_release();
 }
 
 static int table_is_empty(uint64_t *table) {
@@ -162,19 +220,20 @@ static int table_is_empty(uint64_t *table) {
 }
 
 void vmm_unmap_page(uintptr_t va) {
-    
+    vmm_lock_acquire();
+
     uint64_t *pml4 = get_current_pml4();
 
     uint64_t pdpt_e = pml4[PML4_INDEX(va)];
-    if (!(pdpt_e & PTE_PRESENT)) return;
+    if (!(pdpt_e & PTE_PRESENT)) { vmm_lock_release(); return; }
     uint64_t *pdpt = (uint64_t *)((pdpt_e & PTE_ADDR_MASK) + hhdm_offset);
 
     uint64_t pd_e = pdpt[PDPT_INDEX(va)];
-    if (!(pd_e & PTE_PRESENT) || (pd_e & PTE_HUGE)) return;
+    if (!(pd_e & PTE_PRESENT) || (pd_e & PTE_HUGE)) { vmm_lock_release(); return; }
     uint64_t *pd = (uint64_t *)((pd_e & PTE_ADDR_MASK) + hhdm_offset);
 
     uint64_t pt_e = pd[PD_INDEX(va)];
-    if (!(pt_e & PTE_PRESENT) || (pt_e & PTE_HUGE)) return;
+    if (!(pt_e & PTE_PRESENT) || (pt_e & PTE_HUGE)) { vmm_lock_release(); return; }
     uint64_t *pt = (uint64_t *)((pt_e & PTE_ADDR_MASK) + hhdm_offset);
 
     pt[PT_INDEX(va)] = 0;
@@ -197,6 +256,8 @@ void vmm_unmap_page(uintptr_t va) {
             }
         }
     }
+
+    vmm_lock_release();
 }
 
 
@@ -217,15 +278,19 @@ static vma_region_t *kvma_node_alloc() {
 
 
 void vmm_kvma_init() {
+    kvma_lock_acquire();
     vma_region_t *r = kvma_node_alloc();
     r->base  = KERNEL_VMA_BASE;
     r->pages = KERNEL_VMA_SIZE / PMM_PAGE_SIZE;
     r->next  = NULL;
     vma_free_list = r;
+    kvma_lock_release();
 }
 
 
 uintptr_t kvma_alloc(size_t count) {
+    kvma_lock_acquire();
+
     vma_region_t **prev = &vma_free_list;
     vma_region_t  *cur  = vma_free_list;
 
@@ -239,16 +304,19 @@ uintptr_t kvma_alloc(size_t count) {
                 cur->base = 0;
                 cur->next = NULL;
             }
+            kvma_lock_release();
             return base;
         }
         prev = &cur->next;
         cur  = cur->next;
     }
+    kvma_lock_release();
     panic("vmm: kernel VA space exhausted");
 }
 
 void kvma_free(uintptr_t base, size_t count) {
-    
+    kvma_lock_acquire();
+
     vma_region_t **prev = &vma_free_list;
     vma_region_t  *cur  = vma_free_list;
 
@@ -269,12 +337,14 @@ void kvma_free(uintptr_t base, size_t count) {
             p->next   = cur->next;
             cur->pages = 0;
         }
+        kvma_lock_release();
         return;
     }
 
     if (cur && base + count * PMM_PAGE_SIZE == cur->base) {
         cur->base   = base;
         cur->pages += count;
+        kvma_lock_release();
         return;
     }
 
@@ -283,6 +353,6 @@ void kvma_free(uintptr_t base, size_t count) {
     n->pages = count;
     n->next  = cur;
     *prev    = n;
+
+    kvma_lock_release();
 }
-
-

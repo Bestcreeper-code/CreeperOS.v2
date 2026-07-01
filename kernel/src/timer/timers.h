@@ -1,5 +1,5 @@
 #pragma once
-#include "asm/ams.h"
+#include "asm/asm.h"
 #include "time.h"
 #include <stdbool.h>
 #include <stdint.h>

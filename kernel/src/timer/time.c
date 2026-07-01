@@ -1,6 +1,7 @@
 #include "time.h"
+#include "scheduler/scheduler.h"
 #include "timers.h"
-#include "asm/ams.h"
+#include "asm/asm.h"
 #include <stdint.h>
 
 extern volatile uint64_t ticks_ms;
@@ -23,11 +24,11 @@ uint64_t timer_get_us() {
 void sleep_ms(uint64_t ms) {
     uint64_t target = timer_get_ms() + ms;
     while (timer_get_ms() < target)
-        hlt();
+        _yield();
 }
 
 void sleep_us(uint64_t us) {
     uint64_t target = timer_get_us() + us;
     while (timer_get_us() < target)
-        hlt();
+        _yield();
 }

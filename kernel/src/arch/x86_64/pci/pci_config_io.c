@@ -1,6 +1,6 @@
 #include "drivers/PCI/pci_config_io.h"
 
-#include "asm/ams.h"
+#include "asm/asm.h"
 
 #include <stdint.h>
 

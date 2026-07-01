@@ -1,9 +1,10 @@
 #ifndef SCHEDULER_H
 #define SCHEDULER_H
 
-#include "asm/ams.h"
+#include "asm/asm.h"
 #include "defines/lists.h"
 #include "memory/pmm.h"
+
 
 #include <stdint.h>
 
@@ -31,6 +32,7 @@ typedef struct Linked_PCB_t {
     int exit_code;
 
     uintptr_t cr3;
+
 
     struct hlist_node list_node;
 } Linked_PCB_t;

@@ -1,7 +1,9 @@
 #include "scheduler.h"
+#include "arch/locks.h"
 #include "arch/vmm.h"
 #include "arch/x86_64/cpu/gdt.h"
 
+#include "asm/asm.h"
 #include "debug/Logger.h"
 #include "defines/container_of.h"
 #include "defines/err_codes.h"
@@ -10,6 +12,7 @@
 #include "memory/memory.h"
 #include "memory/pmm.h"
 #include "string/string.h"
+#include "config.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -25,7 +28,14 @@ uint8_t task_switching_flag = 0;
 
 uint64_t pid_bitmap[_PID_BITMAP_SIZE] = {[0 ... _PID_BITMAP_SIZE-1] = 0xFFFFFFFFULL};
 
+static size_t scheduler_lock = 0;
+#define SCHED_LOCK_BIT 0
+
 pid_t _get_unused_pid() {
+    acquire_lock(&scheduler_lock, SCHED_LOCK_BIT);
+
+    pid_t result = (pid_t)-1;
+
     for (int i = 0; i < _PID_BITMAP_SIZE; i++) {
         uint64_t* current = &pid_bitmap[i];
 
@@ -34,11 +44,15 @@ pid_t _get_unused_pid() {
         for (int j = 0; j < 64; j++) {
             if (*current & (1ULL << j)) {
                 *current &= ~(1ULL << j);
-                return (pid_t)(i * 64 + j);
+                result = (pid_t)(i * 64 + j);
+                goto done;
             }
         }
     }
-    return (pid_t)-1;
+
+done:
+    release_lock(&scheduler_lock, SCHED_LOCK_BIT);
+    return result;
 }
 
 void _free_pid(pid_t pid) {
@@ -47,7 +61,9 @@ void _free_pid(pid_t pid) {
 
     if (index >= _PID_BITMAP_SIZE) return;
 
+    acquire_lock(&scheduler_lock, SCHED_LOCK_BIT);
     pid_bitmap[index] |= (1ULL << bit);
+    release_lock(&scheduler_lock, SCHED_LOCK_BIT);
 }
 
 
@@ -57,7 +73,7 @@ void _free_pid(pid_t pid) {
 
 
 
-#define SCHED_LOG_INTERVAL 1000U
+#define SCHED_LOG_INTERVAL 2000U
 
 static void _log_all_processes() {
     Sys_log("--- process list ---\n");
@@ -77,23 +93,27 @@ static void _log_all_processes() {
 
 
 
-Linked_PCB_t* new_pcb(physptr_t page_dir, const char* name, uint64_t* rsp, Stack_t k_stack, Stack_t us_stack) {
+Linked_PCB_t* new_pcb(physptr_t page_dir, const char* name, uint64_t* rsp,
+                      Stack_t k_stack, Stack_t us_stack) {
     Linked_PCB_t* new_pcb = (Linked_PCB_t*)kmalloc(sizeof(Linked_PCB_t));
     if (!new_pcb) return NULL;
 
-    new_pcb->pid = _get_unused_pid();
-    if (new_pcb->pid < 0) return NULL;
+    pid_t pid = _get_unused_pid();
+    if (pid < 0) {
+        kfree(new_pcb);
+        return NULL;
+    }
 
+    new_pcb->pid = pid;
     new_pcb->name = strdup(name);
     new_pcb->state = PCB_STATE_RUNNING;
-
     new_pcb->user_stack = us_stack;
     new_pcb->kernel_stack = k_stack;
     new_pcb->k_rsp = *rsp;
-
     new_pcb->cr3 = page_dir;
-
     new_pcb->list_node.next = NULL;
+
+    acquire_lock(&scheduler_lock, SCHED_LOCK_BIT);
 
     if (!_scheduler_process_list_head.first) {
         _scheduler_process_list_head.first = &new_pcb->list_node;
@@ -101,28 +121,42 @@ Linked_PCB_t* new_pcb(physptr_t page_dir, const char* name, uint64_t* rsp, Stack
         hlist_add_head(&new_pcb->list_node, &_scheduler_process_list_head);
     }
 
+    process_list_depth++;
+
+    release_lock(&scheduler_lock, SCHED_LOCK_BIT);
+
     return new_pcb;
 }
 
 int kill_ktask(Linked_PCB_t* pcb) {
     if (!pcb) return -1;
 
-    Sys_log("ktask %u (%s) exited with code:%d\n", pcb->pid, pcb->name, pcb->exit_code);
+    Sys_log("ktask %u (%s) exited with code:%d\n",
+            pcb->pid, pcb->name, pcb->exit_code);
+
+    acquire_lock(&scheduler_lock, SCHED_LOCK_BIT);
 
     hlist_del(&pcb->list_node);
+    process_list_depth--;
+
+    release_lock(&scheduler_lock, SCHED_LOCK_BIT);
+
     _free_pid(pcb->pid);
 
-    pmm_free_pages(ADDR_TO_PAGE(pcb->kernel_stack.top), ADDR_TO_PAGE(pcb->kernel_stack.size));
-    pmm_free_pages(ADDR_TO_PAGE(pcb->user_stack.top), ADDR_TO_PAGE(pcb->user_stack.size));
+    pmm_free_pages(ADDR_TO_PAGE(pcb->kernel_stack.top),
+                   ADDR_TO_PAGE(pcb->kernel_stack.size));
+
+    pmm_free_pages(ADDR_TO_PAGE(pcb->user_stack.top),
+                   ADDR_TO_PAGE(pcb->user_stack.size));
 
     kfree(pcb);
-    process_list_depth--;
 
     return 0;
 }
 
 
 int scheduler_init() {
+    Sys_Info("Initing Scheduler");
     pid_bitmap[0] &= ~(1ULL << 0);
 
     
@@ -137,6 +171,7 @@ int scheduler_init() {
         container_of(_scheduler_process_list_head.first, Linked_PCB_t, list_node);
 
     enable_scheduler();
+    Sys_Success("Scheduler Inited");
     return 0;
 }
 
@@ -209,6 +244,7 @@ Linked_PCB_t* us_task_start(void* entry, char* name, physptr_t page_dir) {
 }
 
 Linked_PCB_t* ktask_start(void* entry, char* name) {
+
     void* stack = (void*)page_kalloc(DEFAULT_STACK_PAGE_AMOUNT+1, PTE_WRITABLE);
     RET_IF(!stack, NULL);
     uint64_t out_rsp = (uintptr_t)stack + DEFAULT_STACK_PAGE_BYTES;
@@ -218,21 +254,30 @@ Linked_PCB_t* ktask_start(void* entry, char* name) {
         (uint64_t)entry  
     );
     Sys_Warning("%p",stack);
-    return new_pcb(kernel_pagedir_phys, name, &out_rsp,
+
+    Linked_PCB_t* res= new_pcb(kernel_pagedir_phys, name, &out_rsp,
         (Stack_t){(uintptr_t)stack, (uintptr_t)stack + DEFAULT_STACK_PAGE_BYTES, DEFAULT_STACK_PAGE_BYTES},
         (Stack_t){0});
+    return res;
 }
 
 void* sched_next_process_core(uint64_t saved_rsp) {
     Linked_PCB_t* current = _scheduler_current_process;
     current->k_rsp = saved_rsp;
 
+#if SCHEDULER_PROC_LIST_DEBUG
     static uint32_t _tick = 0;
     if (++_tick >= SCHED_LOG_INTERVAL) {
         _tick = 0;
         _log_all_processes();
     }
+#endif
 
+#if SCHEDULER_TICK_SERIAL_DEBUG
+    serial_write_string("exiting proc ");
+    serial_log_hex("",current->pid);
+    serial_write_char('\n');
+#endif
     struct hlist_node* next_node = current->list_node.next;
 
 get_next:
@@ -240,7 +285,11 @@ get_next:
         next_node = _scheduler_process_list_head.first;
 
     Linked_PCB_t* next = container_of(next_node, Linked_PCB_t, list_node);
-
+#if SCHEDULER_TICK_SERIAL_DEBUG
+    serial_write_string("running proc ");
+    serial_log_hex("",next->pid);
+    serial_write_char('\n');
+#endif
     if (next->state & PCB_STATE_ZOMBIE) {
         next_node = next->list_node.next;
         kill_ktask(next);
@@ -262,11 +311,9 @@ void yield_core(uintptr_t sp) {
     _ret_to_next_process(sched_next_process_core(sp));
 }
 
+
+void _kernel_yield();
+
 void _yield() {
-    asm volatile (
-        "int $0x80"
-        :
-        : "a"(158)
-        : "memory"
-    );
+    _kernel_yield();
 }

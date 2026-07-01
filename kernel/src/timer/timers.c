@@ -1,7 +1,7 @@
 #include "timers.h"
 #include "arch/x86_64/scheduler/scheduler.h"
 #include "debug/Logger.h"
-#include "asm/ams.h"
+#include "asm/asm.h"
 #include "defines/err_codes.h"
 #include <stddef.h>
 #include <stdint.h>
@@ -72,7 +72,6 @@ timer_dev* timer_get_system_time_dev() {
 bool common_timer_dispatcher(timer_registery_id id, register_t sp) {
     int8_t sid = id;
 
-    
     if (sid < 0)
         return false;
 
@@ -91,21 +90,16 @@ bool common_timer_dispatcher(timer_registery_id id, register_t sp) {
     if (!firing)
         return false;
 
-    if (firing->reset_interrupt)
-        firing->reset_interrupt(firing);
+    if (firing->reset_interrupt) firing->reset_interrupt(firing);
 
-    if (firing == slot_sleep.dev) {
-
-        if(!firing->freq){
-            return false;
-        }
+    if (firing == slot_sleep.dev && firing->freq) {
         ticks_us += (1000000ULL / firing->freq);
         ticks_ms = ticks_us / 1000;
-        // Sys_log_NoPos("%lx\n", ticks_us);
     }
 
-    if (firing == slot_sched.dev && task_switching_flag)
+    if (firing == slot_sched.dev && task_switching_flag) {
         yield_core(sp);
+    }
 
     return true;
 }

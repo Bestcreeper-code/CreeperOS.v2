@@ -1,7 +1,7 @@
 #ifndef CRASHHNDL_H
 #define CRASHHNDL_H
 
-#include "asm/ams.h"
+#include "asm/asm.h"
 #include <stddef.h>
 #include <stdint.h>
 

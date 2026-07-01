@@ -83,7 +83,7 @@ ssize_t ramfile_write(struct file *file, const char *buf, size_t count, loff_t *
     //info->fixed_size = false;
     size_t new_size = info->size + count;
 
-    void *new_mem = krealloc((void*)info->start, new_size);
+    void *new_mem = krealloc_impl((void*)info->start, new_size);
     if (!new_mem)
         return -E_NOMEM;
 
