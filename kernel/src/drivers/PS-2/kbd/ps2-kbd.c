@@ -17,7 +17,7 @@
 
 
 uint8_t kbd_mod_keys;
-char current_Language = KB_LAY_AZERTY;
+char current_language = KB_LAY_AZERTY;
 
 #define SET_KEYBOARD_MOD_FLAG(flag, state) \
     (kbd_mod_keys) = (state) ? (kbd_mod_keys) | (flag) : ((kbd_mod_keys) & ~(flag))
@@ -170,7 +170,7 @@ unsigned char GetInputCharNonBlocking(void) {
         mod = MOD_Shift;
     }
 
-    unsigned char base_char = keymaps[(int)current_Language][mod][keycode];
+    unsigned char base_char = keymaps[(int)current_language][mod][keycode];
 
     if ((GET_KEYBOARD_MOD_FLAG(CTRL_PRESSED) != 0) &&
         ((base_char >= 'A' && base_char <= 'Z') || (base_char >= 'a' && base_char <= 'z')) &&

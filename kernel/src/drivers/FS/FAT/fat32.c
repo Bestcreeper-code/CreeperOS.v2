@@ -1,6 +1,6 @@
 #include "fat32.h"
 
 
-int FS_init(char* drive){
+int fs_init(char* drive){
     
 }

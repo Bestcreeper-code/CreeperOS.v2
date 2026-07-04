@@ -58,7 +58,7 @@ static const char* crash_messages[] = {
 };
 
 
-enum CrashType {
+enum crash_type {
 
     CRASH_DIVIDE_BY_ZERO = 0,           // 0
     CRASH_DEBUG_EXCEPTION,              // 1
@@ -144,7 +144,7 @@ char* isr_error_bits[CRASH_CODES_AMOUNT][32] = {
     }
 };
 
-void _Log_Isr_Error_Code(unsigned char isr_idx, uint64_t code){
+void log_isr_error_code(unsigned char isr_idx, uint64_t code){
     char** errcodes_array = isr_error_bits[isr_idx];
 
     for(int i=0;i < 31;i++){
@@ -204,7 +204,7 @@ void _panic_handler(uint64_t isr_index, uint64_t err_code, cpu_registers_t* regs
         
     Sys_log_NoPos("Error Bits:\n");
     
-    _Log_Isr_Error_Code(isr_index, err_code);
+    log_isr_error_code(isr_index, err_code);
 
     Sys_log_NoPos(" Regs Dump:\n");
 

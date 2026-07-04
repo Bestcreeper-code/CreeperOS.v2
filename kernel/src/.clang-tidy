@@ -1,0 +1,54 @@
+HeaderFilterRegex: '^(?!.*(uACPI|printf|Flanterm)).*'
+
+Checks: >
+  -*,
+  readability-identifier-naming
+
+CheckOptions:
+  - key: readability-identifier-naming.FunctionCase
+    value: lower_case
+  - key: readability-identifier-naming.FunctionIgnoredRegexp
+    value: "^(kmalloc|kfree|krealloc|_[a-z0-9_]+)$"
+
+  - key: readability-identifier-naming.VariableCase
+    value: lower_case
+  - key: readability-identifier-naming.VariableIgnoredRegexp
+    value: "^_[a-z0-9_]+$"
+
+  - key: readability-identifier-naming.GlobalVariableCase
+    value: lower_case
+  - key: readability-identifier-naming.GlobalVariableIgnoredRegexp
+    value: "^_[a-z0-9_]+$"
+
+  - key: readability-identifier-naming.MemberCase
+    value: lower_case
+  - key: readability-identifier-naming.MemberIgnoredRegexp
+    value: "^_[a-z0-9_]+$"
+
+  - key: readability-identifier-naming.StructCase
+    value: lower_case
+  - key: readability-identifier-naming.ClassCase
+    value: lower_case
+  - key: readability-identifier-naming.TypedefCase
+    value: lower_case
+
+  - key: readability-identifier-naming.EnumCase
+    value: lower_case
+  - key: readability-identifier-naming.EnumConstantCase
+    value: UPPER_CASE
+
+  - key: readability-identifier-naming.MacroDefinitionCase
+    value: UPPER_CASE
+  - key: readability-identifier-naming.MacroDefinitionIgnoredRegexp
+    value: "^(kmalloc|kfree|krealloc|_[A-Z0-9_]+)$"
+
+  - key: IncludeCategories
+    value: |
+      - Regex: '^"'
+        Priority: 1
+      - Regex: '^<'
+        Priority: 2
+  - key: SortIncludes
+    value: true
+  - key: IncludeIsMainRegex
+    value: '.*'

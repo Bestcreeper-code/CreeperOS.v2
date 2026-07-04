@@ -25,7 +25,7 @@ static volatile bool is_threaded = false;
 
 typedef struct {
     char buf[LOG_BUFFER_SIZE];
-    _Atomic int ready;
+    int ready;
 } log_slot_t;
 
 #define LOG_RING_QUEUE_SIZE ((LOG_RING_PAGES * PMM_PAGE_SIZE) / sizeof(log_slot_t))

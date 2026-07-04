@@ -203,15 +203,15 @@ int init_allocator() {
 REGISTER_DRIVER_CORE(k_allocator, init_allocator);
 
 
-free_region_t* FirstRegionOfSizeOrMore(size_t size) {
+free_region_t* first_region_of_size_or_more(size_t size) {
     free_region_map_t* k_mmap       = get_free_region_map();
-    size_t             requestedSize = (size + sizeof(uintptr_t) + 7) & ~7U;
+    size_t             requested_size = (size + sizeof(uintptr_t) + 7) & ~7U;
 
     for (int i = 0; i < k_mmap->free_region_count; i++) {
         if (k_mmap->free_regions[i].length == 0) continue;
 
-        uintptr_t currBase = k_mmap->free_regions[i].base_addr;
-        size_t currSize = k_mmap->free_regions[i].length;
+        uintptr_t curr_base = k_mmap->free_regions[i].base_addr;
+        size_t curr_size = k_mmap->free_regions[i].length;
 
         bool merged[MAX_FREE_REGIONS] = {false};
         merged[i] = true;
@@ -223,9 +223,9 @@ free_region_t* FirstRegionOfSizeOrMore(size_t size) {
                 
                 if (merged[j] || k_mmap->free_regions[j].length == 0) continue;
                 
-                if (k_mmap->free_regions[j].base_addr == currBase + currSize) {
+                if (k_mmap->free_regions[j].base_addr == curr_base + curr_size) {
 
-                    currSize += k_mmap->free_regions[j].length;
+                    curr_size += k_mmap->free_regions[j].length;
 
                     merged[j] = true;
                     changed    = true;
@@ -233,12 +233,12 @@ free_region_t* FirstRegionOfSizeOrMore(size_t size) {
             }
         } while (changed);
 
-        if (currSize >= requestedSize) {
+        if (curr_size >= requested_size) {
             for (int j = 0; j < k_mmap->free_region_count; j++) {
                 if (merged[j] && j != i)
                     memset(&k_mmap->free_regions[j], 0, sizeof(free_region_t));
             }
-            k_mmap->free_regions[i].length = currSize;
+            k_mmap->free_regions[i].length = curr_size;
             return &k_mmap->free_regions[i];
         }
     }
@@ -286,7 +286,7 @@ void* kmalloc_impl(size_t size) {
     void* result = NULL;
     size_t full_size = (size + sizeof(uintptr_t) + 7) & ~7U;
 
-    free_region_t* region = FirstRegionOfSizeOrMore(full_size);
+    free_region_t* region = first_region_of_size_or_more(full_size);
 
     if (!region || region->base_addr <= 0xFFFF) {
 
@@ -317,7 +317,7 @@ void* kmalloc_impl(size_t size) {
                    PTE_PRESENT | PTE_WRITABLE);
 
         force_free_nolock(va, pages_needed * PMM_PAGE_SIZE);
-        region = FirstRegionOfSizeOrMore(full_size);
+        region = first_region_of_size_or_more(full_size);
     }
 
     if (!region || region->base_addr <= 0xFFFF) {

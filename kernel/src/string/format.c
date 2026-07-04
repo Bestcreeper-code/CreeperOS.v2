@@ -13,18 +13,18 @@
 
 
 const char* byte_nb_simplify(uint32_t size_bytes, char* buf, int depth) {
-    const uint32_t GiB = 1024u * 1024u * 1024u;
-    const uint32_t MiB = 1024u * 1024u;
-    const uint32_t KiB = 1024u;
+    const uint32_t gib = 1024u * 1024u * 1024u;
+    const uint32_t mib = 1024u * 1024u;
+    const uint32_t kib = 1024u;
 
     char *p = buf;
     int written;
 
-    if (size_bytes >= GiB) {
-        uint32_t v = size_bytes / GiB;
-        written = sprintf(p, "%uGiB", v);
+    if (size_bytes >= gib) {
+        uint32_t v = size_bytes / gib;
+        written = sprintf(p, "%uGIB", v);
         p += written;
-        size_bytes %= GiB;
+        size_bytes %= gib;
 
         if (--depth < 0 || size_bytes == 0) {
             if (size_bytes == 0) return buf;
@@ -34,11 +34,11 @@ const char* byte_nb_simplify(uint32_t size_bytes, char* buf, int depth) {
         }
     }
 
-    if (size_bytes >= MiB) {
-        uint32_t v = size_bytes / MiB;
-        written = sprintf(p, "%uMiB", v);
+    if (size_bytes >= mib) {
+        uint32_t v = size_bytes / mib;
+        written = sprintf(p, "%uMIB", v);
         p += written;
-        size_bytes %= MiB;
+        size_bytes %= mib;
 
         if (--depth < 0 || size_bytes == 0) {
             if (size_bytes == 0) return buf;
@@ -48,11 +48,11 @@ const char* byte_nb_simplify(uint32_t size_bytes, char* buf, int depth) {
         }
     }
 
-    if (size_bytes >= KiB) {
-        uint32_t v = size_bytes / KiB;
-        written = sprintf(p, "%uKiB", v);
+    if (size_bytes >= kib) {
+        uint32_t v = size_bytes / kib;
+        written = sprintf(p, "%uKIB", v);
         p += written;
-        size_bytes %= KiB;
+        size_bytes %= kib;
 
         if (--depth < 0 || size_bytes == 0) {
             if (size_bytes == 0) return buf;

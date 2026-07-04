@@ -162,31 +162,31 @@ uint8_t get_header_type(uint8_t bus, uint8_t device, uint8_t function) {
     return (uint8_t)(value & 0x00FF);
 }
 
-void checkFunction(uint8_t bus, uint8_t device, uint8_t function) {
+void check_function(uint8_t bus, uint8_t device, uint8_t function) {
 }
 
 
 void check_device(uint8_t bus, uint8_t device) {
     uint8_t function = 0;
 
-    uint16_t vendorID = get_vendor_id(bus, device, function);
-    if (vendorID == 0xFFFF) return;
+    uint16_t vendor_id = get_vendor_id(bus, device, function);
+    if (vendor_id == 0xFFFF) return;
 
-    uint16_t deviceID = get_device_id(bus, device, function);
+    uint16_t device_id = get_device_id(bus, device, function);
 
 #if PCI_DEBUG
     const struct pci_device_mapping_entry* devinfo =
-        pci_device_lookup(vendorID, deviceID);
+        pci_device_lookup(vendor_id, device_id);
 
     Sys_log("(%u:%u.%u) vendor_id=%04x (%s) dev_id=%04x (%s)\n",
         (uint32_t)bus, (uint32_t)device, (uint32_t)function,
-        (uint32_t)vendorID,
+        (uint32_t)vendor_id,
         devinfo ? devinfo->vendor_name : "unknown",
-        (uint32_t)deviceID,
+        (uint32_t)device_id,
         devinfo ? devinfo->device_name : "unknown");
 #endif
 
-    pci_driver* driver = get_pci_driver(vendorID, deviceID);
+    pci_driver* driver = get_pci_driver(vendor_id, device_id);
     if (driver) {
         Sys_Info("calling driver %s for (%u:%u.%u)\n",
             driver->name, bus, device, function);
@@ -194,31 +194,31 @@ void check_device(uint8_t bus, uint8_t device) {
     }
 
     //multifunction?
-    uint8_t headerType = get_header_type(bus, device, function);
-    if ((headerType & 0x80) == 0)
+    uint8_t header_type = get_header_type(bus, device, function);
+    if ((header_type & 0x80) == 0)
         return;
 
     
     for (function = 1; function < 8; function++) {
-        uint16_t vId = get_vendor_id(bus, device, function);
-        if (vId == 0xFFFF)
+        uint16_t v_id = get_vendor_id(bus, device, function);
+        if (v_id == 0xFFFF)
             continue;
 
-        uint16_t dId = get_device_id(bus, device, function);
+        uint16_t d_id = get_device_id(bus, device, function);
 
 #if PCI_DEBUG
         const struct pci_device_mapping_entry* devinfo =
-            pci_device_lookup(vId, dId);
+            pci_device_lookup(v_id, d_id);
 
         Sys_log("(%u:%u.%u) vendor_id=%04x (%s) dev_id=%04x (%s)\n",
             (uint32_t)bus, (uint32_t)device, (uint32_t)function,
-            (uint32_t)vId,
+            (uint32_t)v_id,
             devinfo ? devinfo->vendor_name : "unknown",
-            (uint32_t)dId,
+            (uint32_t)d_id,
             devinfo ? devinfo->device_name : "unknown");
 #endif
 
-        pci_driver* driver = get_pci_driver(vId, dId);
+        pci_driver* driver = get_pci_driver(v_id, d_id);
         if (driver) {
             Sys_Info("calling driver %s for (%u:%u.%u)\n",
                 driver->name, bus, device, function);

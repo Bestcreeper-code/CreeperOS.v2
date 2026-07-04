@@ -1,0 +1,10 @@
+
+diffs:
+
+find .   \( -path ./uACPI -o -path ./printf -o -path ./Flanterm \) -prune -o   -name '*.c' -print0 | xargs -0 clang-tidy -p .   --config-file=.clang-tidy   --export-fixes=/tmp/fixes.yaml
+
+
+apply:
+
+find . \( -path ./uACPI -o -path ./printf -o -path ./Flanterm -o -path ./src/arch/x86_64/debug/Logger.c \) -prune -o \
+  -name '*.c' -print0 | xargs -0 clang-tidy -p . --config-file=.clang-tidy --fix
