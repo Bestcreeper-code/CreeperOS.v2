@@ -74,19 +74,23 @@ bool common_timer_dispatcher(timer_registery_id id, register_t sp) {
 
     if (sid < 0)
         return false;
-
+        
     uint8_t uid = (uint8_t)sid;
 
     uint8_t type = (uid >> TIMER_TYPE_SHIFT) & TIMER_TYPE_MASK;
     uint8_t idx  = uid & TIMER_IDX_MASK;
-
-    if (type >= 4)
+    
+    if (type >= 4){       
         return false;
-
-    if (idx >= devices_by_type_count[type])
+    }
+    if (idx >= devices_by_type_count[type]){
         return false;
+    }
 
     timer_dev* firing = devices_by_type[type][idx];
+    // if(!firing->freq)
+    //     Sys_log("%s  (%p)      curr:%s (%p)\n",
+    //         slot_sched.dev ? slot_sched.dev->name : "none", slot_sched.dev,firing->name, firing);
     if (!firing)
         return false;
 
@@ -96,8 +100,9 @@ bool common_timer_dispatcher(timer_registery_id id, register_t sp) {
         ticks_us += (1000000ULL / firing->freq);
         ticks_ms = ticks_us / 1000;
     }
-
+    
     if (firing == slot_sched.dev && task_switching_flag) {
+        
         yield_core(sp);
     }
 

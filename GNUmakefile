@@ -1,5 +1,5 @@
 .SUFFIXES:
-QEMUFLAGS := -m 2G
+QEMUFLAGS := -m 2G -enable-kvm
 override IMAGE_NAME := OSecond
 INITRD_PATH := kernel/src/_initrd
 
@@ -9,7 +9,7 @@ EXTRA_QEMU_DEPS :=
 AHCI_DISK1 := ahci_1.img
 
 QEMUFLAGS += -device ich9-ahci,id=ahci 
-QEMUFLAGS += -machine q35,acpi=off
+QEMUFLAGS += -machine q35,acpi=on
 
 QEMUFLAGS += -drive file=$(AHCI_DISK1),format=raw,if=none,id=disk1
 QEMUFLAGS += -device ide-hd,drive=disk1,bus=ahci.0

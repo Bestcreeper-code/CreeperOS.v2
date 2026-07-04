@@ -4,6 +4,7 @@
 #include "asm/asm.h"
 #include "defines/compiler_defs.h"
 #include "defines/helpers.h"
+#include "interrupts/interrupts.h"
 #include "memops.h"
 #include <stdint.h>
 
@@ -11,14 +12,14 @@
 static struct idt_entry idt[IDT_ENTRIES];
 static struct idt_ptr   idt_reg;
 
-uint64_t idt_vectors_bitmap[IDT_ENTRIES / 64];
+uint64_t idt_vectors_bitmap[IDT_ENTRIES / 64] = { 0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF, 0xFFFFFFFFFFFFFFFF };
 
 extern void *irq_stub_table[IDT_ENTRIES];
 
 void irq_dummy_common(uint64_t vec)
 {
     Sys_Warning("unhandled interrupt %lu\n", vec);
-    outb(0x20, 0x20);
+    _current_eoi((uint8_t)vec);
 }
 
 
@@ -32,16 +33,16 @@ void idt_set_allocated(uint8_t idx)
     bitmap_set((char *)idt_vectors_bitmap, idx, 0);
 }
 
-short allocate_interrut_vector(void)
+short allocate_interrupt_vector(void)
 {
-    return (short)wbitmap_alloc_1_first((char *)idt_vectors_bitmap,
-                                        sizeof(idt_vectors_bitmap));
+    return (short)bitmap_alloc_1_first((char*)idt_vectors_bitmap, 
+        sizeof(idt_vectors_bitmap));
 }
 
 void free_interrupt_vector(uint16_t idx)
 {
     idt_set_gate(idx, 0, 0, 0);
-    bitmap_set((char *)idt_vectors_bitmap, idx, 0);
+    bitmap_set((char *)idt_vectors_bitmap, idx, 1);
 }
 
 void idt_set_gate(uint8_t num, uintptr_t base, uint16_t sel, uint8_t flags)

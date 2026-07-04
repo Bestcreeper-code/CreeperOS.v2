@@ -11,6 +11,9 @@
 
 #define MAX_FREE_REGIONS 128
 
+
+#define KERNEL_HEAP_SEED_PAGES 4
+
 typedef struct {
     uintptr_t base_addr;
     size_t length;

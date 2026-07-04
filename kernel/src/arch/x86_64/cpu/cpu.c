@@ -333,6 +333,9 @@ void register_cpu_exceptions(){
     idt_set_gate(29, (uintptr_t)isr29, 0x08, 0x8E);  idt_set_allocated(29);
     idt_set_gate(30, (uintptr_t)isr30, 0x08, 0x8E);  idt_set_allocated(30);
     idt_set_gate(31, (uintptr_t)isr31, 0x08, 0x8E);  idt_set_allocated(31);
+    
+    idt_set_allocated(32);
+    idt_set_allocated(33);
 
     
 }   

@@ -23,17 +23,19 @@ void arch_init(){
     init_gdt();
     idt_init();
     
-    pic_remap();
-    lapic_init();
-
     register_cpu_exceptions();
-
+    
     //mem
     pmm_init();
     
     hhdm_init();
     
     vmm_kvma_init();
+    
+
+    pic_remap();
+    lapic_init();
+    
 
 
     Sys_Success("Paging set up\n");

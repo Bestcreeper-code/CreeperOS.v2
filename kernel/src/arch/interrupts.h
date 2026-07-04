@@ -6,7 +6,7 @@
 
 
 
-short allocate_interrut_vector();
+short allocate_interrupt_vector();
 void free_interrut_vector(uint16_t idx);
 
 typedef enum {

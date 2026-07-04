@@ -36,7 +36,7 @@ struct block_device* register_block_device(const char *name, lsize_t size,
     blkdev->block_size = block_size;
     blkdev->ops = ops;
     blkdev->private_data = private_data;
-    blkdev->id = wbitmap_alloc_1_first((char*)_blkdev_id_map, sizeof(_blkdev_id_map));
+    blkdev->id = wbitmap_alloc_1_first(_blkdev_id_map, sizeof(_blkdev_id_map));
 
 
     

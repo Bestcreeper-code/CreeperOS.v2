@@ -237,10 +237,11 @@ void _panic_handler(uint64_t isr_index, uint64_t err_code, cpu_registers_t* regs
     Sys_log_NoPos(" FS:  0x%04X  GS:  0x%04X  SS:  0x%04X\n",
         regs->fs, regs->gs, regs->ss);
 
-    Sys_log_NoPos(" CR0: 0x%lx  CR2: 0x%lx  CR3: 0x%lx CR4: 0x%lx CR8: 0x%lx\n",
+    Sys_log_NoPos(" CR0: 0x%016lx  \e[31mCR2: 0x%016lx\e[0m  CR3: 0x%016lx\n",
         regs->cr0, regs->cr2, regs->cr3, regs->cr4, regs->cr8);
-
-    Sys_log_NoPos(" CR3: 0x%lx\n", regs->cr3);
+    
+    Sys_log_NoPos(" CR4: 0x%016lx  CR8: 0x%016lx\n", 
+        regs->cr4, regs->cr8);
 
     asm volatile("sti");
     if (call_stack) {

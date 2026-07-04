@@ -1,4 +1,5 @@
 #include "pmm.h"
+#include "arch/vmm.h"
 #include "debug/Logger.h"
 #include "debug/panic.h"
 #include "memops.h"
@@ -140,7 +141,7 @@ uintptr_t pmm_alloc() {
 
 uintptr_t pmm_alloc_zeroed() {
     uintptr_t phys = pmm_alloc();
-    memset(phys_to_virt(phys), 0, PMM_PAGE_SIZE);
+    memset(PHYS_2_HHDM(phys), 0, PMM_PAGE_SIZE);
     return phys;
 }
 
@@ -177,7 +178,7 @@ uintptr_t pmm_alloc_pages(size_t count) {
 
 uintptr_t pmm_alloc_pages_zeroed(size_t count) {
     uintptr_t phys = pmm_alloc_pages(count);
-    memset(phys_to_virt(phys), 0, count * PMM_PAGE_SIZE);
+    memset(PHYS_2_HHDM(phys), 0, count * PMM_PAGE_SIZE);
     return phys;
 }
 

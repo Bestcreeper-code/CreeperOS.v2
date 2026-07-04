@@ -8,9 +8,11 @@
 #include "defines/container_of.h"
 #include "defines/err_codes.h"
 #include "drivers/drivers.h"
+#include "drivers/pit/pit.h"
 #include "memops.h"
 #include "memory/memory.h"
 #include "memory/pmm.h"
+#include "mm/vmm_arch.h"
 #include "string/string.h"
 #include "config.h"
 
@@ -75,8 +77,8 @@ void _free_pid(pid_t pid) {
 
 #define SCHED_LOG_INTERVAL 2000U
 
-static void _log_all_processes() {
-    Sys_log("--- process list ---\n");
+void _log_all_processes() {
+    Sys_log("process list\n");
     struct hlist_node *n = _scheduler_process_list_head.first;
     while (n) {
         Linked_PCB_t *p = container_of(n, Linked_PCB_t, list_node);
@@ -84,7 +86,7 @@ static void _log_all_processes() {
                 (unsigned)p->pid, (unsigned)p->state, p->name);
         n = n->next;
     }
-    Sys_log("--------------------\n");
+    Sys_log("\n");
 }
 
 
@@ -156,7 +158,9 @@ int kill_ktask(Linked_PCB_t* pcb) {
 
 
 int scheduler_init() {
-    Sys_Info("Initing Scheduler");
+    Sys_Info("Initing PIT\n");
+    pit_init();
+    Sys_Info("Initing Scheduler\n");
     pid_bitmap[0] &= ~(1ULL << 0);
 
     
@@ -171,7 +175,7 @@ int scheduler_init() {
         container_of(_scheduler_process_list_head.first, Linked_PCB_t, list_node);
 
     enable_scheduler();
-    Sys_Success("Scheduler Inited");
+    Sys_Success("Scheduler Inited\n");
     return 0;
 }
 
@@ -196,6 +200,36 @@ void _build_kernel_stack_frame(uint64_t* stack_top, uint64_t entry) {
     *stack_top = (uint64_t)frame;
 }
 
+
+Linked_PCB_t* ktask_start(void* entry, char* name) {
+
+    void* stack = (void*)page_kalloc(DEFAULT_STACK_PAGE_AMOUNT+1, PTE_WRITABLE);
+    RET_IF(!stack, NULL);
+    uint64_t out_rsp = (uintptr_t)stack + DEFAULT_STACK_PAGE_BYTES;
+    
+    _build_kernel_stack_frame(
+        &out_rsp,
+        (uint64_t)entry  
+    );
+    // Sys_Warning("%p",stack);
+
+    Linked_PCB_t* res= new_pcb(kernel_pagedir_phys, name, &out_rsp,
+        (Stack_t){(uintptr_t)stack, (uintptr_t)stack + DEFAULT_STACK_PAGE_BYTES, DEFAULT_STACK_PAGE_BYTES},
+        (Stack_t){0});
+    return res;
+}
+
+
+
+
+
+
+
+
+
+
+
+
 void _build_user_stack_frame(uint64_t** stack_top, uint64_t entry,
                         uint64_t user_rsp, uint16_t cs, uint16_t ss) {
     uint64_t base = (uint64_t)*stack_top;
@@ -212,18 +246,41 @@ void _build_user_stack_frame(uint64_t** stack_top, uint64_t entry,
 
     *stack_top = (uint64_t*)frame;
 }
-
 Linked_PCB_t* us_task_start(void* entry, char* name, physptr_t page_dir) {
-    void* k_stack = (void*)PAGE_TO_ADDR(pmm_alloc_pages(DEFAULT_STACK_PAGE_AMOUNT));
-    RET_IF(!k_stack, 0);
+    Sys_Debug("Starting user task '%s'\n", name);
+    if (!page_dir) {
+        Sys_Error("task '%s': no page directory provided\n", name);
+        return NULL;
+    }
+
+    uint64_t* p_dir = PHYS_2_HHDM(page_dir);
+
+    // map the kernel space manually
+    for (int i = 255; i < 512; i++)
+        p_dir[i] = ((uint64_t*)PHYS_2_HHDM(kernel_pagedir_phys))[i];
+
+    void* k_stack = (void*)page_kalloc(DEFAULT_STACK_PAGE_AMOUNT + 1, PTE_WRITABLE);
+    if (!k_stack) {
+        Sys_Error("task '%s': unable to allocate kernel stack\n", name);
+        return NULL;
+    }
 
     page_index us_stack_pages = pmm_alloc_pages(DEFAULT_STACK_PAGE_AMOUNT);
-    RET_IF(!us_stack_pages, 0);
+    if (!us_stack_pages) {
+        Sys_Error("task '%s': unable to allocate user stack pages\n", name);
+        return NULL;
+    }
+
 
     uintptr_t us_stack_bott = PAGE_TO_ADDR(us_stack_pages);
-    Sys_Fatal("not impl");
-    for(;;);
-    // pd_init(&page_dir);
+
+    
+
+    for (int i = 0; i < DEFAULT_STACK_PAGE_AMOUNT; i++) {
+        uintptr_t page_addr = us_stack_bott + i * PAGE_SIZE_4K;
+        map_4k(p_dir, STACK_UPPER_USPACE_ADDR - (DEFAULT_STACK_PAGE_BYTES - i * PAGE_SIZE_4K),
+                ADDR_TO_PAGE(page_addr), PTE_WRITABLE | PTE_NX | PTE_USER );
+    }
 
     // pd_map_page(&page_dir,
     //     STACK_UPPER_USPACE_ADDR - DEFAULT_STACK_PAGE_BYTES,
@@ -243,23 +300,18 @@ Linked_PCB_t* us_task_start(void* entry, char* name, physptr_t page_dir) {
     //     (Stack_t){us_stack_bott, us_stack_bott + DEFAULT_STACK_PAGE_BYTES, DEFAULT_STACK_PAGE_BYTES});
 }
 
-Linked_PCB_t* ktask_start(void* entry, char* name) {
 
-    void* stack = (void*)page_kalloc(DEFAULT_STACK_PAGE_AMOUNT+1, PTE_WRITABLE);
-    RET_IF(!stack, NULL);
-    uint64_t out_rsp = (uintptr_t)stack + DEFAULT_STACK_PAGE_BYTES;
-    
-    _build_kernel_stack_frame(
-        &out_rsp,
-        (uint64_t)entry  
-    );
-    Sys_Warning("%p",stack);
 
-    Linked_PCB_t* res= new_pcb(kernel_pagedir_phys, name, &out_rsp,
-        (Stack_t){(uintptr_t)stack, (uintptr_t)stack + DEFAULT_STACK_PAGE_BYTES, DEFAULT_STACK_PAGE_BYTES},
-        (Stack_t){0});
-    return res;
-}
+
+
+
+
+
+
+
+
+
+
 
 void* sched_next_process_core(uint64_t saved_rsp) {
     Linked_PCB_t* current = _scheduler_current_process;

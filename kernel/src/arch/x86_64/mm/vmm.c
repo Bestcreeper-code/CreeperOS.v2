@@ -49,8 +49,8 @@ static inline void kvma_lock_acquire() {
 static inline void kvma_lock_release() { release_lock(&kvma_lock, 0); }
 
 
-static inline uint64_t *phys_to_boot_virt(uintptr_t phys) {
-    return (uint64_t *)(phys + hhdm_request.response->offset);
+static inline uint64_t* phys_to_boot_virt(uintptr_t phys) {
+    return (uint64_t* )(phys + hhdm_request.response->offset);
 }
 
 static inline int cpu_has_1gb_pages() {
@@ -59,58 +59,58 @@ static inline int cpu_has_1gb_pages() {
     return (edx >> 26) & 1;
 }
 
-static uint64_t *table_get_or_create(uint64_t *table, size_t idx) {
+static uint64_t* table_get_or_create(uint64_t* table, size_t idx) {
     if (!(table[idx] & PTE_PRESENT)) {
         uintptr_t phys = pmm_alloc_zeroed();
         table[idx] = (phys & PTE_ADDR_MASK) | PTE_PRESENT | PTE_WRITABLE;
     }
 
     uintptr_t offset = hhdm_offset ? hhdm_offset : hhdm_request.response->offset;
-    return (uint64_t *)((table[idx] & PTE_ADDR_MASK) + offset);
+    return (uint64_t* )((table[idx] & PTE_ADDR_MASK) + offset);
 }
 
-static void map_4k_nolock(uint64_t *pml4, uintptr_t va, uintptr_t pa, uint64_t flags) {
-    uint64_t *pdpt = table_get_or_create(pml4, PML4_INDEX(va));
-    uint64_t *pd   = table_get_or_create(pdpt, PDPT_INDEX(va));
-    uint64_t *pt   = table_get_or_create(pd,   PD_INDEX(va));
+static void map_4k_nolock(uint64_t* pml4, uintptr_t va, uintptr_t pa, uint64_t flags) {
+    uint64_t* pdpt = table_get_or_create(pml4, PML4_INDEX(va));
+    uint64_t* pd   = table_get_or_create(pdpt, PDPT_INDEX(va));
+    uint64_t* pt   = table_get_or_create(pd,   PD_INDEX(va));
     pt[PT_INDEX(va)] = (pa & PTE_ADDR_MASK) | flags | PTE_PRESENT;
 }
 
-void map_4k(uint64_t *pml4, uintptr_t va, uintptr_t pa, uint64_t flags) {
+void map_4k(uint64_t* pml4, uintptr_t va, uintptr_t pa, uint64_t flags) {
     vmm_lock_acquire();
     map_4k_nolock(pml4, va, pa, flags);
     vmm_lock_release();
 }
 
-static void map_2m_nolock(uint64_t *pml4, uintptr_t va, uintptr_t pa, uint64_t flags) {
-    uint64_t *pdpt = table_get_or_create(pml4, PML4_INDEX(va));
-    uint64_t *pd   = table_get_or_create(pdpt, PDPT_INDEX(va));
+static void map_2m_nolock(uint64_t* pml4, uintptr_t va, uintptr_t pa, uint64_t flags) {
+    uint64_t* pdpt = table_get_or_create(pml4, PML4_INDEX(va));
+    uint64_t* pd   = table_get_or_create(pdpt, PDPT_INDEX(va));
     pd[PD_INDEX(va)] = (pa & PTE_ADDR_MASK) | flags | PTE_HUGE | PTE_PRESENT;
 }
 
-void map_2m(uint64_t *pml4, uintptr_t va, uintptr_t pa, uint64_t flags) {
+void map_2m(uint64_t* pml4, uintptr_t va, uintptr_t pa, uint64_t flags) {
     vmm_lock_acquire();
     map_2m_nolock(pml4, va, pa, flags);
     vmm_lock_release();
 }
 
-static void map_1g_nolock(uint64_t *pml4, uintptr_t va, uintptr_t pa, uint64_t flags) {
-    uint64_t *pdpt = table_get_or_create(pml4, PML4_INDEX(va));
+static void map_1g_nolock(uint64_t* pml4, uintptr_t va, uintptr_t pa, uint64_t flags) {
+    uint64_t* pdpt = table_get_or_create(pml4, PML4_INDEX(va));
     pdpt[PDPT_INDEX(va)] = (pa & PTE_ADDR_MASK) | flags | PTE_HUGE | PTE_PRESENT;
 }
 
-void map_1g(uint64_t *pml4, uintptr_t va, uintptr_t pa, uint64_t flags) {
+void map_1g(uint64_t* pml4, uintptr_t va, uintptr_t pa, uint64_t flags) {
     vmm_lock_acquire();
     map_1g_nolock(pml4, va, pa, flags);
     vmm_lock_release();
 }
 
 static void hhdm_check_coverage() {
-    struct limine_memmap_response *mm = memmap_request.response;
+    struct limine_memmap_response* mm = memmap_request.response;
     uintptr_t top = 0;
 
     for (uint64_t i = 0; i < mm->entry_count; i++) {
-        struct limine_memmap_entry *e = mm->entries[i];
+        struct limine_memmap_entry* e = mm->entries[i];
         uintptr_t end = (uintptr_t)(e->base + e->length);
         Sys_Debug("limine_memmap_entries[%d]" "\t" "base:%lx" "\t" "length:%lx" "\t" "type:%ld\n",i,e->base,e->length,e->type);
         if (end > top) top = end;
@@ -118,12 +118,12 @@ static void hhdm_check_coverage() {
 
     if (top > (uintptr_t)HHDM_SIZE_GB * PAGE_SIZE_1G) {
         char buffer[128];
-        sprintf(buffer,"HHDM_SIZE_GB(%lx) too small for installed RAM(%lx)",HHDM_SIZE_GB*PAGE_SIZE_1G, top);
+        sprintf(buffer,"HHDM_SIZE_GB(%lx) too small for installed RAM(%lx)\n",HHDM_SIZE_GB*PAGE_SIZE_1G, top);
         panic(buffer);
     }
 }
 
-static void hhdm_map_physical_memory(uint64_t *pml4) {
+static void hhdm_map_physical_memory(uint64_t* pml4) {
     uint64_t flags = PTE_PRESENT | PTE_WRITABLE | PTE_NX;
     int huge1g = cpu_has_1gb_pages();
 
@@ -141,7 +141,7 @@ static void hhdm_map_physical_memory(uint64_t *pml4) {
     }
 }
 
-static void hhdm_map_kernel(uint64_t *pml4) {
+static void hhdm_map_kernel(uint64_t* pml4) {
     uintptr_t kphys = (uintptr_t)kaddr_request.response->physical_base;
     uintptr_t kvirt = (uintptr_t)kaddr_request.response->virtual_base;
     uintptr_t ksize = (uintptr_t)_kernel_end - (uintptr_t)_kernel_start;
@@ -155,7 +155,7 @@ void hhdm_init() {
     hhdm_check_coverage();
 
     uintptr_t pml4_phys = pmm_alloc_zeroed();
-    uint64_t *pml4 = phys_to_boot_virt(pml4_phys);
+    uint64_t* pml4 = phys_to_boot_virt(pml4_phys);
 
     hhdm_map_physical_memory(pml4);
     hhdm_map_kernel(pml4);
@@ -170,11 +170,11 @@ uintptr_t vmm_virt_to_phys(uintptr_t vaddr) {
 
     uintptr_t cr3 = cr3_get();
 
-    uint64_t *pml4 = (uint64_t *)(cr3 + hhdm_offset);
+    uint64_t* pml4 = (uint64_t* )(cr3 + hhdm_offset);
     uint64_t pdpt_e = pml4[PML4_INDEX(vaddr)];
     if (!(pdpt_e & PTE_PRESENT)) { vmm_lock_release(); return UINTPTR_MAX; }
 
-    uint64_t *pdpt = (uint64_t *)((pdpt_e & PTE_ADDR_MASK) + hhdm_offset);
+    uint64_t* pdpt = (uint64_t* )((pdpt_e & PTE_ADDR_MASK) + hhdm_offset);
     uint64_t pd_e = pdpt[PDPT_INDEX(vaddr)];
     if (!(pd_e & PTE_PRESENT)) { vmm_lock_release(); return UINTPTR_MAX; }
     if (pd_e & PTE_HUGE) {
@@ -183,7 +183,7 @@ uintptr_t vmm_virt_to_phys(uintptr_t vaddr) {
         return result;
     }
 
-    uint64_t *pd = (uint64_t *)((pd_e & PTE_ADDR_MASK) + hhdm_offset);
+    uint64_t* pd = (uint64_t* )((pd_e & PTE_ADDR_MASK) + hhdm_offset);
     uint64_t pt_e = pd[PD_INDEX(vaddr)];
     if (!(pt_e & PTE_PRESENT)) { vmm_lock_release(); return UINTPTR_MAX; }
     if (pt_e & PTE_HUGE) {
@@ -192,7 +192,7 @@ uintptr_t vmm_virt_to_phys(uintptr_t vaddr) {
         return result;
     }
 
-    uint64_t *pt = (uint64_t *)((pt_e & PTE_ADDR_MASK) + hhdm_offset);
+    uint64_t* pt = (uint64_t* )((pt_e & PTE_ADDR_MASK) + hhdm_offset);
     uint64_t page_e = pt[PT_INDEX(vaddr)];
     if (!(page_e & PTE_PRESENT)) { vmm_lock_release(); return UINTPTR_MAX; }
 
@@ -201,9 +201,9 @@ uintptr_t vmm_virt_to_phys(uintptr_t vaddr) {
     return result;
 }
 
-static uint64_t *get_current_pml4() {
+static uint64_t* get_current_pml4() {
     uintptr_t cr3 = cr3_get();
-    return (uint64_t *)(cr3 + hhdm_offset);
+    return (uint64_t* )(cr3 + hhdm_offset);
 }
 
 void vmm_map_page(uintptr_t va, uintptr_t pa, uint64_t flags) {
@@ -213,7 +213,7 @@ void vmm_map_page(uintptr_t va, uintptr_t pa, uint64_t flags) {
     vmm_lock_release();
 }
 
-static int table_is_empty(uint64_t *table) {
+static int table_is_empty(uint64_t* table) {
     for (int i = 0; i < 512; i++)
         if (table[i]) return 0;
     return 1;
@@ -222,19 +222,19 @@ static int table_is_empty(uint64_t *table) {
 void vmm_unmap_page(uintptr_t va) {
     vmm_lock_acquire();
 
-    uint64_t *pml4 = get_current_pml4();
+    uint64_t* pml4 = get_current_pml4();
 
     uint64_t pdpt_e = pml4[PML4_INDEX(va)];
     if (!(pdpt_e & PTE_PRESENT)) { vmm_lock_release(); return; }
-    uint64_t *pdpt = (uint64_t *)((pdpt_e & PTE_ADDR_MASK) + hhdm_offset);
+    uint64_t* pdpt = (uint64_t* )((pdpt_e & PTE_ADDR_MASK) + hhdm_offset);
 
     uint64_t pd_e = pdpt[PDPT_INDEX(va)];
     if (!(pd_e & PTE_PRESENT) || (pd_e & PTE_HUGE)) { vmm_lock_release(); return; }
-    uint64_t *pd = (uint64_t *)((pd_e & PTE_ADDR_MASK) + hhdm_offset);
+    uint64_t* pd = (uint64_t* )((pd_e & PTE_ADDR_MASK) + hhdm_offset);
 
     uint64_t pt_e = pd[PD_INDEX(va)];
     if (!(pt_e & PTE_PRESENT) || (pt_e & PTE_HUGE)) { vmm_lock_release(); return; }
-    uint64_t *pt = (uint64_t *)((pt_e & PTE_ADDR_MASK) + hhdm_offset);
+    uint64_t* pt = (uint64_t* )((pt_e & PTE_ADDR_MASK) + hhdm_offset);
 
     pt[PT_INDEX(va)] = 0;
     invlpg(va);
@@ -267,9 +267,9 @@ void vmm_unmap_page(uintptr_t va) {
 
 
 static vma_region_t  vma_pool[512];
-static vma_region_t *vma_free_list = NULL;
+static vma_region_t* vma_free_list = NULL;
 
-static vma_region_t *kvma_node_alloc() {
+static vma_region_t* kvma_node_alloc() {
     for (size_t i = 0; i < 512; i++) {
         if (vma_pool[i].pages == 0) return &vma_pool[i];
     }
@@ -279,7 +279,7 @@ static vma_region_t *kvma_node_alloc() {
 
 void vmm_kvma_init() {
     kvma_lock_acquire();
-    vma_region_t *r = kvma_node_alloc();
+    vma_region_t* r = kvma_node_alloc();
     r->base  = KERNEL_VMA_BASE;
     r->pages = KERNEL_VMA_SIZE / PMM_PAGE_SIZE;
     r->next  = NULL;
@@ -291,8 +291,8 @@ void vmm_kvma_init() {
 uintptr_t kvma_alloc(size_t count) {
     kvma_lock_acquire();
 
-    vma_region_t **prev = &vma_free_list;
-    vma_region_t  *cur  = vma_free_list;
+    vma_region_t** prev = &vma_free_list;
+    vma_region_t* cur  = vma_free_list;
 
     while (cur) {
         if (cur->pages >= count) {
@@ -317,8 +317,8 @@ uintptr_t kvma_alloc(size_t count) {
 void kvma_free(uintptr_t base, size_t count) {
     kvma_lock_acquire();
 
-    vma_region_t **prev = &vma_free_list;
-    vma_region_t  *cur  = vma_free_list;
+    vma_region_t** prev = &vma_free_list;
+    vma_region_t* cur  = vma_free_list;
 
     while (cur && cur->base < base) {
         prev = &cur->next;
@@ -326,7 +326,7 @@ void kvma_free(uintptr_t base, size_t count) {
     }
 
     
-    vma_region_t *p = (prev == &vma_free_list) ? NULL
+    vma_region_t* p = (prev == &vma_free_list) ? NULL
                 : container_of(prev, vma_region_t, next);
 
     if (p && p->base + p->pages * PMM_PAGE_SIZE == base) {
@@ -348,7 +348,7 @@ void kvma_free(uintptr_t base, size_t count) {
         return;
     }
 
-    vma_region_t *n = kvma_node_alloc();
+    vma_region_t* n = kvma_node_alloc();
     n->base  = base;
     n->pages = count;
     n->next  = cur;

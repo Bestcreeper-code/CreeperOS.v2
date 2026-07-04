@@ -5,6 +5,7 @@
 #include "defines/compiler_defs.h"
 #include "ps2-kbd.h"
 #include "input/input.h"
+#include "interrupts/interrupts.h"
 #include "memops.h"
 #include "drivers/drivers.h"
 #include "vfs/vfs.h"
@@ -214,7 +215,7 @@ void ps2_keyboard_handler(void* frame) {
         }
         Sys_log_NoPos("%c",ch);
     }
-    outb(0x20, 0x20);
+    _current_eoi((uint8_t)HARDCODED_PS2_KBD_INTERRUPT_VECTOR_INDEX);
 }
 
 
@@ -250,6 +251,7 @@ struct input_device_ops ps2_kbd_ops = {
 };
 
 int ps2_kbd_init() {
+    idt_set_allocated(HARDCODED_PS2_KBD_INTERRUPT_VECTOR_INDEX);
     setup_interrupt_vector(HARDCODED_PS2_KBD_INTERRUPT_VECTOR_INDEX, ps2_keyboard_handler, IRQ_FLAG_INTERRUPT);
 
     

@@ -12,6 +12,7 @@
 #include <stdint.h>
 #include "string/string.h"
 #include "memops.h"
+#include "timer/time.h"
 
 
 static uint8_t current_fg = ANSI_WHITE;
@@ -92,6 +93,10 @@ void _log_manager_thread() {
 void sys_serial_vlogf(const char* format, const char* file,
     const char* func, int line, va_list args)
 {
+    uint64_t ms = timer_get_ms();
+    uint64_t secs = ms / 1000;
+    uint64_t millis = ms % 1000;
+
     if (!is_threaded) {
         char msg[LOG_BUFFER_SIZE];
         vsnprintf(msg, sizeof(msg), format, args);
@@ -99,32 +104,44 @@ void sys_serial_vlogf(const char* format, const char* file,
         if (func && line) {
             char serial_out[LOG_BUFFER_SIZE];
             snprintf(serial_out, sizeof(serial_out),
-                "< %s:%d(%s)> %s",
+                "\e[0m[%llu.%03llu] < %s:%d(%s)> %s",
+                (unsigned long long)secs, (unsigned long long)millis,
                 file, line, func, msg);
             serial_write_string(serial_out);
         } else if (file && file[0]) {
             char serial_out[LOG_BUFFER_SIZE];
             snprintf(serial_out, sizeof(serial_out),
-                "< %s> %s",
+                "\e[0m[%llu.%03llu] < %s> %s",
+                (unsigned long long)secs, (unsigned long long)millis,
                 file, msg);
             serial_write_string(serial_out);
         } else {
-            serial_write_string(msg);
+            char serial_out[LOG_BUFFER_SIZE];
+            snprintf(serial_out, sizeof(serial_out),
+                "\e[0m[%llu.%03llu] %s",
+                (unsigned long long)secs, (unsigned long long)millis, msg);
+            serial_write_string(serial_out);
         }
 
-        printf("%s", msg);
+        printf("\e[0m[%llu.%03llu] %s",
+            (unsigned long long)secs, (unsigned long long)millis, msg);
         return;
     }
 
     uint32_t idx = atomic_fetch_add_explicit(&log_ring_queue_write_idx, 1, memory_order_relaxed)
-                   % LOG_RING_QUEUE_SIZE;
+        % LOG_RING_QUEUE_SIZE;
     log_slot_t *slot = &log_ring_queue[idx];
-
     if (atomic_load_explicit(&slot->ready, memory_order_acquire)) {
         return;
     }
 
-    vsnprintf(slot->buf, LOG_BUFFER_SIZE, format, args);
+    int n = snprintf(slot->buf, LOG_BUFFER_SIZE, "\e[0m[%llu.%03llu] ",
+        (unsigned long long)secs, (unsigned long long)millis);
+    if (n > 0 && (size_t)n < LOG_BUFFER_SIZE) {
+        vsnprintf(slot->buf + n, LOG_BUFFER_SIZE - n, format, args);
+    } else {
+        vsnprintf(slot->buf, LOG_BUFFER_SIZE, format, args);
+    }
 
     atomic_store_explicit(&slot->ready, 1, memory_order_release);
 }

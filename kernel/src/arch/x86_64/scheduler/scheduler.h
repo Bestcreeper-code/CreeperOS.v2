@@ -75,7 +75,7 @@ void disable_scheduler();
 void yield_core(uintptr_t sp);
 void _yield();
 
-
 void _sched_next_process();
+void _log_all_processes();
 
 #endif // SCHEDULER_H

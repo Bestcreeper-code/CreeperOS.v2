@@ -1,5 +1,8 @@
 [BITS 64]
+
 extern _panic_handler
+extern _current_eoi
+
 %define MAX_STACK_TRACE_SIZE 16
 
 %macro SAVE_ALL 0
@@ -80,6 +83,12 @@ isr_call_stack  resq MAX_STACK_TRACE_SIZE
 
 section .text
 isr_common_handler:
+
+    movzx edi, byte [rsp + 196] ;vector
+
+    mov  rax, [rel _current_eoi]
+    call rax
+
     mov  rax, [rsp + 128]
     mov  [isr_call_stack], rax
 

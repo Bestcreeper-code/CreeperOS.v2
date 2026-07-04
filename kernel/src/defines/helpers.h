@@ -4,7 +4,7 @@
 
 
 size_t bitmap_alloc_1_first(char *bitmap, size_t nbytes);
-size_t wbitmap_alloc_1_first(char *bitmap, size_t nbytes);
+size_t wbitmap_alloc_1_first(size_t* bitmap, size_t nbytes);
 
 static inline void bitmap_set(char *bitmap, size_t idx, int state) {
     size_t byte = idx / 8;

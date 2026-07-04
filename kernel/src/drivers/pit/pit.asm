@@ -5,6 +5,9 @@ global pit_isr_entry
 
 extern pit_timer_ticks_ms
 extern _pit_timer_device_id
+extern _pit_timer_irq_vector
+
+extern _current_eoi
 
 extern common_timer_dispatcher
 
@@ -17,9 +20,10 @@ pit_isr_entry:
     mov  rsi, rsp
 
     call common_timer_dispatcher
-    
-    mov al, 0x20
-    out 0x20, al
+
+    mov dil, byte [rel _pit_timer_irq_vector]
+    mov rax, [_current_eoi]
+    call rax   
 
     POP_ALL
     iretq

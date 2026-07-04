@@ -7,9 +7,11 @@
 #include "asm/asm.h"
 #include "defines/types.h"
 #include "drivers/drivers.h"
+#include "drivers/pit/pit.h"
 #include "initrd_parse/initrd.h"
 #include "memory/memory.h"
 #include "mm/vmm_arch.h"
+#include "string/format.h"
 #include "string/string.h"
 #include "debug/Logger.h"
 #include "memory/pmm.h"
@@ -95,20 +97,88 @@ void _kstart() {
 }
 
 volatile int counter = 0;
-void loop(){
-    int id=counter++;
-    for(int i = 0; i < 10000; i++){
-        // char* d =kmalloc(80);
-        // sprintf(d,"\e[31m0000000\e[0m\n");
-        // kfree(d);
-        // printf_("%s",d);
-        Sys_log("\e[33mkthread %d",id);
-        Sys_Success("\n");
-        sleep_ms(20);
+void loop(void) {
+    static volatile uint32_t rng = 0x12345678;
+
+    #define RAND() ({ \
+        rng ^= rng << 13; \
+        rng ^= rng >> 17; \
+        rng ^= rng << 5; \
+        rng; \
+    })
+
+    static const uint32_t colors[16] = {
+        0x000000, 0xAA0000, 0x00AA00, 0xAAAA00,
+        0x0000AA, 0xAA00AA, 0x00AAAA, 0xAAAAAA,
+        0x555555, 0xFF5555, 0x55FF55, 0xFFFF55,
+        0x5555FF, 0xFF55FF, 0x55FFFF, 0xFFFFFF
+    };
+
+    int x = RAND() % (framebuffer_request.response->framebuffers[0]->width - 3);
+    int y = RAND() % (framebuffer_request.response->framebuffers[0]->height - 3);
+
+    int dx = (RAND() % 3) - 1;
+    int dy = (RAND() % 3) - 1;
+
+    if (dx == 0 && dy == 0)
+        dx = 1;
+
+    uint32_t color = colors[(RAND() % 15) + 1];
+
+    for (int ticks = 0; ticks < 100000; ticks++) {
+        for (int yy = 0; yy < 10; yy++) {
+            uint32_t *row = (uint32_t *)((uint8_t *)framebuffer_request.response->framebuffers[0]->address +
+                                         (y + yy) * framebuffer_request.response->framebuffers[0]->pitch);
+            for (int xx = 0; xx < 10; xx++)
+                row[x + xx] = 0x000000;
+        }
+
+        if ((RAND() & 31) == 0) {
+            dx = (RAND() % 3) - 1;
+            dy = (RAND() % 3) - 1;
+            if (dx == 0 && dy == 0)
+                dx = 1;
+        }
+
+        x += dx;
+        y += dy;
+
+        if (x < 0) { x = 0; dx = -dx; }
+        if (y < 0) { y = 0; dy = -dy; }
+
+        if (x > (int)framebuffer_request.response->framebuffers[0]->width - 3) {
+            x = framebuffer_request.response->framebuffers[0]->width - 3;
+            dx = -dx;
+        }
+
+        if (y > (int)framebuffer_request.response->framebuffers[0]->height - 3) {
+            y = framebuffer_request.response->framebuffers[0]->height - 3;
+            dy = -dy;
+        }
+
+        for (int yy = 0; yy < 10; yy++) {
+            uint32_t *row = (uint32_t *)((uint8_t *)framebuffer_request.response->framebuffers[0]->address +
+                                         (y + yy) * framebuffer_request.response->framebuffers[0]->pitch);
+            for (int xx = 0; xx < 10; xx++)
+                row[x + xx] = color;
+        }
+
+        sleep_ms(5);
     }
-    _scheduler_current_process->exit_code=-999999;
+
+    // erase the particle before exiting
+    for (int yy = 0; yy < 3; yy++) {
+        uint32_t *row = (uint32_t *)((uint8_t *)framebuffer_request.response->framebuffers[0]->address +
+                                     (y + yy) * framebuffer_request.response->framebuffers[0]->pitch);
+        for (int xx = 0; xx < 3; xx++)
+            row[x + xx] = 0x000000;
+    }
+
+    _scheduler_current_process->exit_code = 0;
     kill_ktask(_scheduler_current_process);
     _yield();
+
+    #undef RAND
 }
 
 void kmain() {
@@ -116,49 +186,46 @@ void kmain() {
     
     core_init();
     sysfs_init();
+    
     // fs_init();
     scheduler_init();
     
-
-
-
-    initrd_init();
-
-    flanterm_clear(ft_ctx, 0);
+    
+    log_queue_init();
+    Linked_PCB_t* klogger_pcb = ktask_start(_log_manager_thread, "klogger");
+    if(!klogger_pcb){
+        Sys_Error("couldn't init logger thread\n");
+        for(;;);
+    }else {
+        Sys_Success("klogger started as pid:%d\n",klogger_pcb->pid);
+        // for(;;);
+    }
     
     // for(int i = 0; i < 22; i++){
     //     hlt();
     // }
+
+
+    
+    
+    sti();
+    initrd_init();
         
     dev_init();
+    // {  
+    //     for(int j = 0; j < 200; j++){
+    //         ktask_start(loop, "test-loop");
 
+    //         char buff[100];
+    //         byte_nb_simplify(pmm_get_free_pages() * PAGE_SIZE_4K, buff, 100);
+    //         Sys_log("%s\n", buff);
+    //     }
+    //     _log_all_processes();
+    // }
     
-    for(int i = 0; i < 70; i++){
-        Sys_Info("\n", i, ktask_start(loop, "test-loop")->pid);
-    }
-    
-    
-    flanterm_clear(ft_ctx, 0);
+    us_task_start(init_drivers,"test uspace",pmm_alloc());
 
-    log_queue_init();
-    Linked_PCB_t* klogger_pcb = ktask_start(_log_manager_thread, "klogger");
-    if(!klogger_pcb){
-        Sys_Error("couldn't init logger thread");
-        for(;;);
-    }else {
-        Sys_Success("klogger started as pid:%d",klogger_pcb->pid);
-        // for(;;);
-    }
-
-    flanterm_clear(ft_ctx, 2);
-    // flanterm_full_refresh(ft_ctx);
-    // flanterm_flush(ft_ctx);
-    // for(;;);
-    sti();
-    // flanterm_full_refresh(ft_ctx);
-    // late_init();
-    
-    for(;;);
     Sys_Warning("Kernel reached halt????\n");
-    // hcf();
+    for(;;);
+    hcf();
 }

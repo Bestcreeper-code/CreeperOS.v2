@@ -21,7 +21,7 @@ enum timer_dev_type {
 
 typedef struct timer_dev {
     const char* name;
-    uint32_t freq;
+    uint64_t freq;
     uint8_t type;
     uint8_t vector;
     uint32_t flags;

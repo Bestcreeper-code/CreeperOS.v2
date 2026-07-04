@@ -1,5 +1,6 @@
 #include "input.h"
 #include "debug/Logger.h"
+#include "defines/compiler_defs.h"
 #include "memory/memory.h"
 #include "string/string.h"
 #include "defines/err_codes.h"
@@ -30,8 +31,8 @@ struct input_device* register_input_device(const char *name, struct input_device
     idev->private_data = private_data;
 
     idev->id = wbitmap_alloc_1_first(
-        (char*)_input_id_map,
-        sizeof(_input_id_map)
+        _input_id_map,
+        arr_lengthof(_input_id_map)
     );
 
     if (!input_device_list_start) {

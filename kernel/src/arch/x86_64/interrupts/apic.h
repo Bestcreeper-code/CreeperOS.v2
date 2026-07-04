@@ -33,6 +33,12 @@
 #define LAPIC_REG_DIV       0x3E0
 
 
+#define LAPIC_TIMER_MODE(mode) ((mode & 0x3) << 17)
+
+#define LAPIC_TIMER_MODE_ONE_SHOT 0
+#define LAPIC_TIMER_MODE_PERIODIC 1
+
+
 
 
 
@@ -58,3 +64,6 @@ static inline void lapic_eoi(){
 
 int lapic_init();
 
+
+
+uint8_t lapic_timer_init( uint8_t mode, uint32_t initial_count, uint32_t divide_config);

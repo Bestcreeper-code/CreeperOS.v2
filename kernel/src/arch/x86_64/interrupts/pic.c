@@ -1,13 +1,14 @@
 #include "pic.h"
 #include "debug/Logger.h"
 #include "asm/asm.h"
+#include "config.h"
 
 
 #define IA32_APIC_BASE_MSR 0x1B
 #define IA32_APIC_BASE_MSR_ENABLE 0x800
 
 void pic_remap() {
-    
+#if PIC_DISABLE_APIC
     Sys_Info("Disabling APIC\n");
     
     uint64_t apic_base = rdmsr(IA32_APIC_BASE_MSR);
@@ -16,7 +17,7 @@ void pic_remap() {
     apic_base &= ~IA32_APIC_BASE_MSR_ENABLE;
     
     wrmsr(IA32_APIC_BASE_MSR, apic_base);
-    
+#endif   
     Sys_Info("remapping PIC...\n");
     
     outb(0x20, 0x11); // Start initialization (master PIC)
@@ -40,4 +41,12 @@ void pic_remap() {
 void block_pic() {
     outb(0x21, 0xFF);
     outb(0xA1, 0xFF);
+}
+
+
+void pic_send_eoi(uint8_t vector) {
+    if (vector >= 0x28) {
+        outb(0xA0, 0x20); // slave PIC
+    }
+    outb(0x20, 0x20); // master PIC
 }

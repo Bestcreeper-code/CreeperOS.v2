@@ -1,10 +1,12 @@
 #include "pit.h"
+#include "cpu/idt.h"
 #include "debug/Logger.h"
 #include "arch/interrupts.h"
 #include "asm/asm.h"
 #include "defines/compiler_defs.h"
 #include "defines/err_codes.h"
 #include "drivers/drivers.h"
+#include "interrupts/interrupts.h"
 #include "memory/memory.h"
 #include "timer/timers.h"
 #include <stddef.h>
@@ -19,8 +21,7 @@ volatile uint64_t pit_timer_ticks_ms = 0;
 
 timer_registery_id _pit_timer_device_id;
 
-
-
+uint8_t _pit_timer_irq_vector = HARDCODED_PIT_INTERRUPT_VECTOR;
 
 void pit_isr_entry();
 
@@ -28,13 +29,13 @@ uint64_t pit_gettime() {
     return pit_timer_ticks_ms;
 }
 void pit_reset_int(timer_dev*) {
-    outb(0x20, 0x20);//EOI
+    _current_eoi((uint8_t)HARDCODED_PIT_INTERRUPT_VECTOR);
 }
 
 
 int pit_init() {
     Sys_log("initializing PIT\n");
-    
+
     pit_timer_ticks_ms = 0;
     
     timer_dev* dev = kmalloc(sizeof(timer_dev));
@@ -56,6 +57,8 @@ int pit_init() {
     
     dev->vector = HARDCODED_PIT_INTERRUPT_VECTOR;
     
+    idt_set_allocated(HARDCODED_PIT_INTERRUPT_VECTOR);
+
     // Interrupt setup
     int irq_ret = setup_interrupt_vector(
         HARDCODED_PIT_INTERRUPT_VECTOR,
@@ -103,7 +106,7 @@ int pit_init() {
     return 0;
     
 }
-REGISTER_DRIVER_DEV(pit, pit_init);
+// REGISTER_DRIVER_DEV(pit, pit_init);
 
 
 
