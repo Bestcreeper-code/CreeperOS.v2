@@ -1,0 +1,135 @@
+#define SYS_READ        0
+#define SYS_WRITE       1
+#define SYS_OPEN        2
+#define SYS_CLOSE       3
+#define SYS_SCHED_YIELD 24
+#define SYS_EXIT        60
+#define SYS_MKDIR       83
+#define SYS_CREAT       85
+
+static long syscall3(long n, long a1, long a2, long a3)
+{
+    long ret;
+
+    asm volatile(
+        "syscall"
+        : "=a"(ret)
+        : "a"(n),
+          "D"(a1),
+          "S"(a2),
+          "d"(a3)
+        : "rcx", "r11", "memory"
+    );
+
+    return ret;
+}
+
+static long syscall2(long n, long a1, long a2)
+{
+    long ret;
+
+    asm volatile(
+        "syscall"
+        : "=a"(ret)
+        : "a"(n),
+          "D"(a1),
+          "S"(a2)
+        : "rcx", "r11", "memory"
+    );
+
+    return ret;
+}
+
+static long syscall1(long n, long a1)
+{
+    long ret;
+
+    asm volatile(
+        "syscall"
+        : "=a"(ret)
+        : "a"(n),
+          "D"(a1)
+        : "rcx", "r11", "memory"
+    );
+
+    return ret;
+}
+
+
+static char dir[] = "/tmp/ctest";
+static char file[] = "/tmp/ctest/hello.txt";
+
+static char msg[] =
+    "hello from C userspace syscall test\n";
+
+
+void main(void)
+{
+    long ret;
+    int fd;
+
+
+    // mkdir /tmp/ctest
+    ret = syscall2(
+        SYS_MKDIR,
+        (long)dir,
+        0755
+    );
+
+
+    // create file
+    ret = syscall2(
+        SYS_CREAT,
+        (long)file,
+        0644
+    );
+
+
+    // open file
+    fd = syscall3(
+        SYS_OPEN,
+        (long)file,
+        2,       // O_RDWR
+        0
+    );
+
+
+    if (fd >= 0) {
+
+        // write file
+        syscall3(
+            SYS_WRITE,
+            fd,
+            (long)msg,
+            sizeof(msg)-1
+        );
+
+
+        // close
+        syscall1(
+            SYS_CLOSE,
+            fd
+        );
+    }
+
+
+    // yield once
+    syscall0:
+    asm volatile(
+        "mov $24, %%rax\n"
+        "syscall\n"
+        :
+        :
+        : "rax", "rcx", "r11"
+    );
+
+
+    // exit but leave files
+    syscall1(
+        SYS_EXIT,
+        0
+    );
+
+
+    while(1);
+}

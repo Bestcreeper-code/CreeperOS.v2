@@ -1,20 +1,20 @@
 .SUFFIXES:
-QEMUFLAGS := -m 2G -enable-kvm
+QEMUFLAGS := -m 2G #-enable-kvm
 override IMAGE_NAME := OSecond
 INITRD_PATH := kernel/src/_initrd
 
 
 EXTRA_QEMU_DEPS :=
 
-AHCI_DISK1 := ahci_1.img
+# AHCI_DISK1 := ahci_1.img
 
-QEMUFLAGS += -device ich9-ahci,id=ahci 
-QEMUFLAGS += -machine q35,acpi=on
+# QEMUFLAGS += -device ich9-ahci,id=ahci 
+# QEMUFLAGS += -machine q35,acpi=on
 
-QEMUFLAGS += -drive file=$(AHCI_DISK1),format=raw,if=none,id=disk1
-QEMUFLAGS += -device ide-hd,drive=disk1,bus=ahci.0
+# QEMUFLAGS += -drive file=$(AHCI_DISK1),format=raw,if=none,id=disk1
+# QEMUFLAGS += -device ide-hd,drive=disk1,bus=ahci.0
 
-EXTRA_QEMU_DEPS += $(AHCI_DISK1)
+# EXTRA_QEMU_DEPS += $(AHCI_DISK1)
 
 
 HOST_CC := cc
@@ -47,6 +47,17 @@ run: edk2-ovmf-bins $(IMAGE_NAME).iso $(EXTRA_QEMU_DEPS)
 		-cdrom $(IMAGE_NAME).iso \
 		-serial stdio \
 		$(QEMUFLAGS)
+run-qemulogs: edk2-ovmf-bins $(IMAGE_NAME).iso $(EXTRA_QEMU_DEPS)
+	qemu-system-x86_64 \
+		-M q35 \
+		-accel tcg \
+		-drive if=pflash,unit=0,format=raw,file=edk2-ovmf-bins/ovmf-code-x86_64.fd,readonly=on \
+		-cdrom $(IMAGE_NAME).iso \
+		-serial stdio \
+		$(QEMUFLAGS) \
+		-d int,guest_errors,unimp \
+  		-D qemu.log \
+		-no-reboot \
 
 .PHONY: run-hdd
 run-hdd: edk2-ovmf-bins $(IMAGE_NAME).hdd $(EXTRA_QEMU_DEPS)

@@ -1,12 +1,17 @@
 #include "vfs.h"
+#include "arch/vmm.h"
 #include "defines/container_of.h"
 #include "fs.h"
 #include "defines/lists.h"
+#include "memory/pmm.h"
+#include "mm/vmm_arch.h"
+#include "scheduler/scheduler.h"
 #include "string/string.h"
 #include "memory/memory.h"
 // #include "time.h"
 #include "defines/types.h"
 #include "defines/err_codes.h"
+#include <stddef.h>
 
 static struct file_system_type *fs_registry = NULL;
 

@@ -16,3 +16,5 @@ kernel/src/compile_commands.json
 edk2-ovmf-bins
 limine-binary
 *.cache
+*.o
+*.elf

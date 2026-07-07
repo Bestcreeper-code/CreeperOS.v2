@@ -1,10 +1,11 @@
 #include "debug/panic.h"
 
+
+#include "arch/vmm.h"
 #include "debug/Logger.h"
+#include "printf/printf.h"
 #include "timer/time.h"
 #include "asm/asm.h"
-#include "memops.h"
-#include "printf/printf.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -238,11 +239,14 @@ void _panic_handler(uint64_t isr_index, uint64_t err_code, cpu_registers_t* regs
         regs->fs, regs->gs, regs->ss);
 
     Sys_log_NoPos(" CR0: 0x%016lx  \e[31mCR2: 0x%016lx\e[0m  CR3: 0x%016lx\n",
-        regs->cr0, regs->cr2, regs->cr3, regs->cr4, regs->cr8);
+        regs->cr0, regs->cr2, regs->cr3);
     
     Sys_log_NoPos(" CR4: 0x%016lx  CR8: 0x%016lx\n", 
         regs->cr4, regs->cr8);
 
+
+        void dump_userspace_mappings(uint64_t* pml4);
+        dump_userspace_mappings(PHYS_2_HHDM(regs->cr3));
     asm volatile("sti");
     if (call_stack) {
         Sys_log_NoPos(" Call Stack Trace:\n");

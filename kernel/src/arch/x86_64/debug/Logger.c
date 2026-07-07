@@ -117,9 +117,7 @@ void sys_serial_vlogf(const char* format, const char* file,
             serial_write_string(serial_out);
         } else {
             char serial_out[LOG_BUFFER_SIZE];
-            snprintf(serial_out, sizeof(serial_out),
-                "\e[0m[%llu.%03llu] %s",
-                (unsigned long long)secs, (unsigned long long)millis, msg);
+            snprintf(serial_out, sizeof(serial_out), "%s", msg);
             serial_write_string(serial_out);
         }
 
@@ -135,8 +133,16 @@ void sys_serial_vlogf(const char* format, const char* file,
         return;
     }
 
-    int n = snprintf(slot->buf, LOG_BUFFER_SIZE, "\e[0m[%llu.%03llu] ",
-        (unsigned long long)secs, (unsigned long long)millis);
+    int n;
+    if(!file && !func && !line){
+        
+        n = 0;
+    }else {
+
+        n = snprintf(slot->buf, LOG_BUFFER_SIZE, "\e[0m[%llu.%03llu] ",
+            (unsigned long long)secs, (unsigned long long)millis);
+    }
+
     if (n > 0 && (size_t)n < LOG_BUFFER_SIZE) {
         vsnprintf(slot->buf + n, LOG_BUFFER_SIZE - n, format, args);
     } else {

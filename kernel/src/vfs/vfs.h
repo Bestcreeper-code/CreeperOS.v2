@@ -7,8 +7,10 @@
 
 
 
+#include "defines/compiler_defs.h"
 #include "defines/lists.h"
 #include "defines/types.h"
+#include "scheduler/scheduler.h"
 
 
 
@@ -59,12 +61,16 @@ enum file_flag {
 };
 
 typedef struct file {
-    struct inode *f_inode;          // points to the file/directory inode
+    struct inode* f_inode;          // points to the file/directory inode
     loff_t f_pos;                   // current file position (for read/write)
     uint32_t f_flags;           // O_RDONLY, O_WRONLY, etc.
-    void *private_data;             // filesystem-specific data
-    const struct file_operations *f_ops; // pointer to file operations
+    void* private_data;             // filesystem-specific data
+    const struct file_operations* f_ops; // pointer to file operations
+    
+    uint8_t reserved[24];
 } file;
+
+_Static_assert(sizeof(file) ==64, "size must be 64 bits");
 
 
 struct file_operations {

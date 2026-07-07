@@ -1,9 +1,10 @@
 #pragma once
 #include <stdint.h>
 #include <stddef.h>
+#include "memory/pmm.h"
 #include "mm/vmm_arch.h"
 
-#define PTE_ADDR_MASK 0x000FFFFFFFFFF000ULL
+
 
 #define PAGE_SIZE_4K  0x1000ULL
 #define PAGE_SIZE_2M  0x200000ULL
@@ -50,9 +51,14 @@ void map_4k(uint64_t *pml4, uintptr_t va, uintptr_t pa, uint64_t flags);
 void map_2m(uint64_t *pml4, uintptr_t va, uintptr_t pa, uint64_t flags);
 void map_1g(uint64_t *pml4, uintptr_t va, uintptr_t pa, uint64_t flags);
 
+void map_4k_pages(uint64_t* pml4, uintptr_t va, uintptr_t pa, size_t count, uint64_t flags);
+void map_2m_pages(uint64_t* pml4, uintptr_t va, uintptr_t pa, size_t count, uint64_t flags);
+void map_1g_pages(uint64_t* pml4, uintptr_t va, uintptr_t pa, size_t count, uint64_t flags);
+
 void vmm_map_page(uintptr_t vpage, uintptr_t ppage, uint64_t flags);
 void vmm_unmap_page(uintptr_t vpage);
 
+void vmm_pagetable_free_owned(physptr_t pml4_phys);
 
 // void vmm_map_page(uintptr_t vpage, uintptr_t ppage, uint64_t flags);
 // void vmm_unmap_page(uintptr_t vpage);

@@ -109,8 +109,9 @@ typedef struct {
 typedef struct {
     uintptr_t top,bottom;
     size_t size;
-} Stack_t;
+} stack_t;
 
+typedef stack_t heap_t;
 
 inline void capture_cpu_registers(cpu_registers_t* regs) {
     asm volatile(

@@ -4,6 +4,7 @@
 #include "asm/asm.h"
 #include "defines/container_of.h"
 #include "memory/pmm.h"
+#include "mm/vmm_arch.h"
 #include "printf/printf.h"
 #include "requests.h"
 #include "arch/locks.h"
@@ -59,10 +60,14 @@ static inline int cpu_has_1gb_pages() {
     return (edx >> 26) & 1;
 }
 
-static uint64_t* table_get_or_create(uint64_t* table, size_t idx) {
+static uint64_t* table_get_or_create(uint64_t* table, size_t idx, uint64_t flags) {
+    uint64_t perm_bits = flags & (PTE_WRITABLE | PTE_USER | PTE_LOCAL_OWNED);
+
     if (!(table[idx] & PTE_PRESENT)) {
         uintptr_t phys = pmm_alloc_zeroed();
-        table[idx] = (phys & PTE_ADDR_MASK) | PTE_PRESENT | PTE_WRITABLE;
+        table[idx] = (phys & PTE_ADDR_MASK) | PTE_PRESENT | perm_bits;
+    } else if ((table[idx] & perm_bits) != perm_bits) {
+        table[idx] |= perm_bits;
     }
 
     uintptr_t offset = hhdm_offset ? hhdm_offset : hhdm_request.response->offset;
@@ -70,9 +75,9 @@ static uint64_t* table_get_or_create(uint64_t* table, size_t idx) {
 }
 
 static void map_4k_nolock(uint64_t* pml4, uintptr_t va, uintptr_t pa, uint64_t flags) {
-    uint64_t* pdpt = table_get_or_create(pml4, PML4_INDEX(va));
-    uint64_t* pd   = table_get_or_create(pdpt, PDPT_INDEX(va));
-    uint64_t* pt   = table_get_or_create(pd,   PD_INDEX(va));
+    uint64_t* pdpt = table_get_or_create(pml4, PML4_INDEX(va), flags);
+    uint64_t* pd   = table_get_or_create(pdpt, PDPT_INDEX(va), flags);
+    uint64_t* pt   = table_get_or_create(pd,   PD_INDEX(va),   flags);
     pt[PT_INDEX(va)] = (pa & PTE_ADDR_MASK) | flags | PTE_PRESENT;
 }
 
@@ -82,9 +87,17 @@ void map_4k(uint64_t* pml4, uintptr_t va, uintptr_t pa, uint64_t flags) {
     vmm_lock_release();
 }
 
+void map_4k_pages(uint64_t* pml4, uintptr_t va, uintptr_t pa, size_t count, uint64_t flags) {
+    vmm_lock_acquire();
+    for (size_t i = 0; i < count; i++) {
+        map_4k_nolock(pml4, va + i * PAGE_SIZE_4K, pa + i * PAGE_SIZE_4K, flags);
+    }
+    vmm_lock_release();
+}
+
 static void map_2m_nolock(uint64_t* pml4, uintptr_t va, uintptr_t pa, uint64_t flags) {
-    uint64_t* pdpt = table_get_or_create(pml4, PML4_INDEX(va));
-    uint64_t* pd   = table_get_or_create(pdpt, PDPT_INDEX(va));
+    uint64_t* pdpt = table_get_or_create(pml4, PML4_INDEX(va), flags);
+    uint64_t* pd   = table_get_or_create(pdpt, PDPT_INDEX(va), flags);
     pd[PD_INDEX(va)] = (pa & PTE_ADDR_MASK) | flags | PTE_HUGE | PTE_PRESENT;
 }
 
@@ -94,14 +107,30 @@ void map_2m(uint64_t* pml4, uintptr_t va, uintptr_t pa, uint64_t flags) {
     vmm_lock_release();
 }
 
+void map_2m_pages(uint64_t* pml4, uintptr_t va, uintptr_t pa, size_t count, uint64_t flags) {
+    vmm_lock_acquire();
+    for (size_t i = 0; i < count; i++) {
+        map_2m_nolock(pml4, va + i * PAGE_SIZE_2M, pa + i * PAGE_SIZE_2M, flags);
+    }
+    vmm_lock_release();
+}
+
 static void map_1g_nolock(uint64_t* pml4, uintptr_t va, uintptr_t pa, uint64_t flags) {
-    uint64_t* pdpt = table_get_or_create(pml4, PML4_INDEX(va));
+    uint64_t* pdpt = table_get_or_create(pml4, PML4_INDEX(va), flags);
     pdpt[PDPT_INDEX(va)] = (pa & PTE_ADDR_MASK) | flags | PTE_HUGE | PTE_PRESENT;
 }
 
 void map_1g(uint64_t* pml4, uintptr_t va, uintptr_t pa, uint64_t flags) {
     vmm_lock_acquire();
     map_1g_nolock(pml4, va, pa, flags);
+    vmm_lock_release();
+}
+
+void map_1g_pages(uint64_t* pml4, uintptr_t va, uintptr_t pa, size_t count, uint64_t flags) {
+    vmm_lock_acquire();
+    for (size_t i = 0; i < count; i++) {
+        map_1g_nolock(pml4, va + i * PAGE_SIZE_1G, pa + i * PAGE_SIZE_1G, flags);
+    }
     vmm_lock_release();
 }
 
@@ -326,7 +355,8 @@ void kvma_free(uintptr_t base, size_t count) {
     }
 
     
-    vma_region_t* p = (prev == &vma_free_list) ? NULL
+    vma_region_t* p = (prev == &vma_free_list) ? 
+                NULL
                 : container_of(prev, vma_region_t, next);
 
     if (p && p->base + p->pages * PMM_PAGE_SIZE == base) {
@@ -355,4 +385,38 @@ void kvma_free(uintptr_t base, size_t count) {
     *prev    = n;
 
     kvma_lock_release();
+}
+
+
+
+static void vmm_free_owned_recursive(uint64_t* table, int level) {
+    for (size_t i = 0; i < 512; i++) {
+        uint64_t entry = table[i];
+        if (!(entry & PTE_PRESENT))
+            continue;
+        
+        if (!(entry & PTE_LOCAL_OWNED))
+            continue;
+
+        int is_leaf = (level == 1) || (entry & PTE_HUGE);
+        uintptr_t phys = entry & PTE_ADDR_MASK;
+
+        if (is_leaf) {
+            // Sys_Debug("Freeing owned page(0X%p) mapped with  U/S:%d R/W:%d\n",phys,(bool)(entry & PTE_USER),(bool)(entry & PTE_WRITABLE));
+            pmm_free(phys);
+            table[i] = 0;
+            continue;
+        }
+        uint64_t* child = (uint64_t*)PHYS_2_HHDM(phys);
+        vmm_free_owned_recursive(child, level - 1);
+        pmm_free(phys);
+        table[i] = 0;
+    }
+}
+
+void vmm_pagetable_free_owned(physptr_t pml4_phys) {
+    vmm_lock_acquire();
+    uint64_t* pml4 = (uint64_t*)PHYS_2_HHDM(pml4_phys );
+    vmm_free_owned_recursive(pml4, 4);
+    vmm_lock_release();
 }

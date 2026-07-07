@@ -8,7 +8,7 @@ extern void gdt_flush(uint64_t);   /* in asm/gdt.asm */
 /* 7 slots: null, kcode, kdata, udata, ucode, tss_lo, tss_hi */
 static struct gdt_entry64 gdt[7];
 static struct gdt_ptr64   gdt_ptr;
-static struct tss64        tss;
+struct tss64        _tss;
 
 static void set_gate(int idx, uint32_t base, uint32_t limit,
                      uint8_t access, uint8_t flags)
@@ -42,7 +42,7 @@ void init_gdt(void)
     set_gate(3, 0, 0xFFFFF, 0xF2, 0xC0);         // user data
     set_gate(4, 0, 0xFFFFF, 0xFA, 0xA0);         // user code
 
-    set_tss_gate(5, (uintptr_t)&tss, sizeof(tss) - 1);
+    set_tss_gate(5, (uintptr_t)&_tss, sizeof(_tss) - 1);
 
     gdt_ptr.limit = sizeof(gdt) - 1;
     gdt_ptr.base  = (uint64_t)&gdt;
@@ -52,11 +52,11 @@ void init_gdt(void)
 void init_tss(uintptr_t rsp0)
 {
     Sys_Info("Initing Kernel TSS \n");
-    memset(&tss, 0, sizeof(tss));
-    tss.rsp0      = rsp0;
-    tss.iomap_base = sizeof(tss);
+    memset(&_tss, 0, sizeof(_tss));
+    _tss.rsp0      = rsp0;
+    _tss.iomap_base = sizeof(_tss);
     __asm__ volatile("ltr %0" :: "r"((uint16_t)(TSS_GDT_INDEX << 3)));
     Sys_Success("Kernel TSS Inited \n");
 }
 
-void setTss_sp(uintptr_t rsp0) { tss.rsp0 = rsp0; }
+void set_tss_sp(uintptr_t rsp0) { _tss.rsp0 = rsp0; }

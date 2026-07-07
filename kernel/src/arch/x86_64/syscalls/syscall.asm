@@ -1,13 +1,15 @@
+%include "arch/x86_64/asm/macros.inc"
 [BITS 64]
 
 extern syscall_handler
 extern _ret_to_next_process
+extern _tss
 
 global _syscall_entry
 
-
 %define USER_CS 0x23
 %define USER_SS 0x1B
+%define TSS_RSP0_OFFSET 4
 
 section .bss
 align 8
@@ -16,34 +18,18 @@ _syscall_user_rsp_scratch: resq 1
 
 section .text
 _syscall_entry:
-    
-    mov [rel _syscall_user_rsp_scratch], rsp
 
-    ; iretq frame 
-    push USER_SS                                ; ss
-    push qword [rel _syscall_user_rsp_scratch]   ; user rsp
-    push r11                                     ; rflags
-    push USER_CS                                 ; cs
-    push rcx                                     ; rip
+    mov [rel _syscall_user_rsp_scratch], rsp ; stash user rsp
+    mov rsp, [rel _tss + TSS_RSP0_OFFSET] ; this process's kernel stack
 
-    ; sched frame
-    push rax            ; syscall number
-    push rcx
+    ; iretq frame  (bullshit way to make yield work.. might change it later if i remember to)
+    push USER_SS ; ss
+    push qword [rel _syscall_user_rsp_scratch] ; user rsp
+    push r11 ; rflags
+    push USER_CS ; cs
+    push rcx ; rip
 
-    push rdx            ; arg3
-    push rbx
-    push rbp
-    push rsi             ; arg2
-    push rdi             ; arg1
-    push r8              ; arg5
-    push r9              ; arg6
-    push r10             ; arg4
-    push r11             
-
-    push r12
-    push r13
-    push r14
-    push r15
+    PUSH_ALL
 
     mov rbx, rdi       ; arg1
     mov rbp, rsi       ; arg2
@@ -61,13 +47,24 @@ _syscall_entry:
 
     mov rax, rsp        ; stash rsp
 
-    sub rsp, 8              
+    sub rsp, 8
     push r15                ; arg6
-    push rax                ; rsp
+    push rax                ; rsp(arg7)
 
     call syscall_handler
 
-    add rsp, 24
+    add rsp, 24              ;clean args
 
-    mov rax, rsp
-    jmp _ret_to_next_process
+    ;change the saved rax to the ret addr
+    mov [rsp + 14*8], rax
+
+    POP_ALL
+
+    ; stack now holds the iretq frame
+    pop rcx                  ; rip
+    add rsp, 8               ; skip cs
+    pop r11                  ; rflags
+    pop rsp                  ; user rsp
+
+    o64 sysret
+

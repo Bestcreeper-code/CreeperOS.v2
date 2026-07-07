@@ -40,7 +40,7 @@ int sysfs_register_block(struct block_device* blkdev) {
 
     sprintf(buf, "%s\n", blkdev->name);
 
-    ramfile_create(path, (uintptr_t)buf, len, S_IFREG | 0444, true, false);
+    k_ramfile_create(path, (uintptr_t)buf, len, S_IFREG | 0444, true, false);
 
 
     //size
@@ -52,7 +52,7 @@ int sysfs_register_block(struct block_device* blkdev) {
 
     len = sprintf(buf, "%llu\n", blkdev->size);
 
-    ramfile_create(path, (uintptr_t)buf, len, S_IFREG | 0444, true, false);
+    k_ramfile_create(path, (uintptr_t)buf, len, S_IFREG | 0444, true, false);
     
 
     //block_size
@@ -64,7 +64,7 @@ int sysfs_register_block(struct block_device* blkdev) {
 
     len = sprintf(buf, "%zu\n", blkdev->block_size);
 
-    ramfile_create(path, (uintptr_t)buf, len, S_IFREG | 0444, true, false);
+    k_ramfile_create(path, (uintptr_t)buf, len, S_IFREG | 0444, true, false);
 
 
     return 0;
@@ -94,7 +94,7 @@ int sysfs_register_input(struct input_device* idev) {
 
     sprintf(buf, "%s\n", idev->name);
 
-    ramfile_create(path, (uintptr_t)buf, len, S_IFREG | 0444, true, false);
+    k_ramfile_create(path, (uintptr_t)buf, len, S_IFREG | 0444, true, false);
 
     //id
     sprintf(path, "%s/id", dir);
@@ -104,7 +104,7 @@ int sysfs_register_input(struct input_device* idev) {
 
     len = sprintf(buf, "%d\n", idev->id);
 
-    ramfile_create(path, (uintptr_t)buf, len, S_IFREG | 0444, true, false);
+    k_ramfile_create(path, (uintptr_t)buf, len, S_IFREG | 0444, true, false);
 
     return 0;
 }

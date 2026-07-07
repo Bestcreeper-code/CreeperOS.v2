@@ -1,28 +1,30 @@
-#include "scheduler.h"
 #include "arch/locks.h"
 #include "arch/vmm.h"
 #include "arch/x86_64/cpu/gdt.h"
-
 #include "asm/asm.h"
+#include "config.h"
 #include "debug/Logger.h"
 #include "defines/container_of.h"
 #include "defines/err_codes.h"
-#include "drivers/drivers.h"
+#include "defines/lists.h"
 #include "drivers/pit/pit.h"
 #include "memops.h"
 #include "memory/memory.h"
 #include "memory/pmm.h"
 #include "mm/vmm_arch.h"
+#include "scheduler.h"
 #include "string/string.h"
-#include "config.h"
+#include "vfs/vfs.h"
 
 #include <stddef.h>
 #include <stdint.h>
 
+
+
 HLIST_HEAD(_scheduler_process_list_head);
 
 uint16_t process_list_depth = 1;
-Linked_PCB_t* _scheduler_current_process = 0;
+linked_pcb* _scheduler_current_process = 0;
 
 #define _PID_BITMAP_SIZE (MAX_PID / 64)
 
@@ -81,7 +83,7 @@ void _log_all_processes() {
     Sys_log("process list\n");
     struct hlist_node *n = _scheduler_process_list_head.first;
     while (n) {
-        Linked_PCB_t *p = container_of(n, Linked_PCB_t, list_node);
+        linked_pcb *p = container_of(n, linked_pcb, list_node);
         Sys_log("  pid=%-4u  state=0x%02x  name=%s\n",
                 (unsigned)p->pid, (unsigned)p->state, p->name);
         n = n->next;
@@ -95,9 +97,9 @@ void _log_all_processes() {
 
 
 
-Linked_PCB_t* new_pcb(physptr_t page_dir, const char* name, uint64_t* rsp,
-                      Stack_t k_stack, Stack_t us_stack) {
-    Linked_PCB_t* new_pcb = (Linked_PCB_t*)kmalloc(sizeof(Linked_PCB_t));
+linked_pcb* new_pcb(physptr_t page_dir, const char* name, uint64_t* rsp,
+                      stack_t k_stack, stack_t us_stack) {
+    linked_pcb* new_pcb = (linked_pcb*)kmalloc(sizeof(linked_pcb));
     if (!new_pcb) return NULL;
 
     pid_t pid = _get_unused_pid();
@@ -130,7 +132,7 @@ Linked_PCB_t* new_pcb(physptr_t page_dir, const char* name, uint64_t* rsp,
     return new_pcb;
 }
 
-int kill_ktask(Linked_PCB_t* pcb) {
+int kill_ktask(linked_pcb* pcb) {
     if (!pcb) return -1;
 
     Sys_log("ktask %u (%s) exited with code:%d\n",
@@ -148,9 +150,41 @@ int kill_ktask(Linked_PCB_t* pcb) {
     pmm_free_pages(ADDR_TO_PAGE(pcb->kernel_stack.top),
                    ADDR_TO_PAGE(pcb->kernel_stack.size));
 
-    pmm_free_pages(ADDR_TO_PAGE(pcb->user_stack.top),
-                   ADDR_TO_PAGE(pcb->user_stack.size));
+    kfree(pcb);
 
+    return 0;
+}
+
+int kill_us_task(linked_pcb* pcb) {
+    if (!pcb) return -1;
+
+    Sys_log("user task %u (%s) exited with code:%d\n",
+            pcb->pid, pcb->name, pcb->exit_code);
+
+    acquire_lock(&scheduler_lock, SCHED_LOCK_BIT);
+
+    hlist_del(&pcb->list_node);
+    process_list_depth--;
+
+    release_lock(&scheduler_lock, SCHED_LOCK_BIT);
+
+    _free_pid(pcb->pid);
+
+    page_kfree(
+        pcb->kernel_stack.top,
+        ADDR_TO_PAGE(pcb->kernel_stack.size)
+    );
+
+    pmm_free_pages(
+        pcb->user_stack.top,
+        ADDR_TO_PAGE(pcb->user_stack.size)
+    );
+    
+    vmm_pagetable_free_owned(pcb->cr3);
+    
+
+    kfree(pcb->name);
+    // hlist_del(&pcb->list_node);
     kfree(pcb);
 
     return 0;
@@ -168,11 +202,11 @@ int scheduler_init() {
     uint64_t tmp = 0x200000;
 
     new_pcb(kernel_pagedir_phys, "Kernel", &tmp,
-        (Stack_t){0x200000, 0x1FF000, DEFAULT_STACK_PAGE_BYTES},
-        (Stack_t){0});
+        (stack_t){0x200000, 0x1FF000, DEFAULT_STACK_PAGE_BYTES},
+        (stack_t){0});
 
     _scheduler_current_process =
-        container_of(_scheduler_process_list_head.first, Linked_PCB_t, list_node);
+        container_of(_scheduler_process_list_head.first, linked_pcb, list_node);
 
     enable_scheduler();
     Sys_Success("Scheduler Inited\n");
@@ -186,10 +220,10 @@ void disable_scheduler() { task_switching_flag = 0; }
 
 void _build_kernel_stack_frame(uint64_t* stack_top, uint64_t entry) {
     uint64_t base = *stack_top;
-    ProcessStackFrame* frame =
-        (ProcessStackFrame*)(base - sizeof(ProcessStackFrame));
+    process_stack_frame* frame =
+        (process_stack_frame*)(base - sizeof(process_stack_frame));
 
-    memset(frame, 0, sizeof(ProcessStackFrame));
+    memset(frame, 0, sizeof(process_stack_frame));
 
     frame->rip    = entry;
     frame->cs     = KERNEL_CODE_SEGMENT;
@@ -201,7 +235,7 @@ void _build_kernel_stack_frame(uint64_t* stack_top, uint64_t entry) {
 }
 
 
-Linked_PCB_t* ktask_start(void* entry, char* name) {
+linked_pcb* ktask_start(void* entry, char* name) {
 
     void* stack = (void*)page_kalloc(DEFAULT_STACK_PAGE_AMOUNT+1, PTE_WRITABLE);
     RET_IF(!stack, NULL);
@@ -213,9 +247,15 @@ Linked_PCB_t* ktask_start(void* entry, char* name) {
     );
     // Sys_Warning("%p",stack);
 
-    Linked_PCB_t* res= new_pcb(kernel_pagedir_phys, name, &out_rsp,
-        (Stack_t){(uintptr_t)stack, (uintptr_t)stack + DEFAULT_STACK_PAGE_BYTES, DEFAULT_STACK_PAGE_BYTES},
-        (Stack_t){0});
+    linked_pcb* res = new_pcb(kernel_pagedir_phys, name, &out_rsp,
+        (stack_t){
+            .bottom = (uintptr_t)stack,
+            .top = (uintptr_t)stack + DEFAULT_STACK_PAGE_BYTES,
+
+            .size = DEFAULT_STACK_PAGE_BYTES
+        },
+        (stack_t){0}
+    );
     return res;
 }
 
@@ -233,10 +273,10 @@ Linked_PCB_t* ktask_start(void* entry, char* name) {
 void _build_user_stack_frame(uint64_t** stack_top, uint64_t entry,
                         uint64_t user_rsp, uint16_t cs, uint16_t ss) {
     uint64_t base = (uint64_t)*stack_top;
-    ProcessStackFrame* frame =
-        (ProcessStackFrame*)(base - sizeof(ProcessStackFrame));
+    process_stack_frame* frame =
+        (process_stack_frame*)(base - sizeof(process_stack_frame));
 
-    memset(frame, 0, sizeof(ProcessStackFrame));
+    memset(frame, 0, sizeof(process_stack_frame));
 
     frame->rip    = entry;
     frame->cs     = cs;
@@ -246,8 +286,9 @@ void _build_user_stack_frame(uint64_t** stack_top, uint64_t entry,
 
     *stack_top = (uint64_t*)frame;
 }
-Linked_PCB_t* us_task_start(void* entry, char* name, physptr_t page_dir) {
-    Sys_Debug("Starting user task '%s'\n", name);
+
+linked_pcb* us_task_start(void* entry, char* name, physptr_t page_dir) {
+    Sys_Debug("Starting user task '%s'(cr3: %p)\n", name, (void*)page_dir);
     if (!page_dir) {
         Sys_Error("task '%s': no page directory provided\n", name);
         return NULL;
@@ -272,41 +313,95 @@ Linked_PCB_t* us_task_start(void* entry, char* name, physptr_t page_dir) {
     }
 
 
-    uintptr_t us_stack_bott = PAGE_TO_ADDR(us_stack_pages);
-
-    
+    uintptr_t us_stack_bott = us_stack_pages;   // no PAGE_TO_ADDR
 
     for (int i = 0; i < DEFAULT_STACK_PAGE_AMOUNT; i++) {
         uintptr_t page_addr = us_stack_bott + i * PAGE_SIZE_4K;
         map_4k(p_dir, STACK_UPPER_USPACE_ADDR - (DEFAULT_STACK_PAGE_BYTES - i * PAGE_SIZE_4K),
-                ADDR_TO_PAGE(page_addr), PTE_WRITABLE | PTE_NX | PTE_USER );
+            page_addr, PTE_WRITABLE | PTE_NX | PTE_USER | PTE_LOCAL_OWNED);   // no ADDR_TO_PAGE
+    }
+    
+    
+    uint64_t* stack_top = (uint64_t*)(k_stack + DEFAULT_STACK_PAGE_BYTES);
+    
+    _build_user_stack_frame(
+        &stack_top,
+        (uint64_t)entry,
+        STACK_UPPER_USPACE_ADDR,
+        USER_CODE_SEGMENT, USER_DATA_SEGMENT
+    );
+    
+    
+    linked_pcb* res = new_pcb(
+        page_dir,
+        name,
+        (uint64_t*)&stack_top,
+        (stack_t){
+            .bottom = (uintptr_t)k_stack, 
+            .top = (uintptr_t)k_stack + DEFAULT_STACK_PAGE_BYTES, 
+
+            .size = DEFAULT_STACK_PAGE_BYTES
+        },
+        (stack_t){
+            .bottom = us_stack_bott,
+            .top = us_stack_bott + DEFAULT_STACK_PAGE_BYTES, 
+            
+            .size = DEFAULT_STACK_PAGE_BYTES
+        }
+    );
+
+    
+
+
+
+
+    physptr_t heap_pages = pmm_alloc_pages(256 / (PAGE_SIZE_4K/sizeof(file)));
+    if(!heap_pages) {
+        Sys_Error("task '%s': unable to allocate user heap pages\n", name);
+        return NULL;
     }
 
-    // pd_map_page(&page_dir,
-    //     STACK_UPPER_USPACE_ADDR - DEFAULT_STACK_PAGE_BYTES,
-    //     us_stack_pages, 1, 1, 1);
+    map_4k_pages(
+        PHYS_2_HHDM(res->cr3),
+        DEFAULT_USER_HEAP_START, heap_pages,
+        DEFAULT_USER_HEAP_PAGES, PTE_USER | PTE_WRITABLE | PTE_LOCAL_OWNED
+    );
+    
+    res->heap.bottom = DEFAULT_USER_HEAP_START;
+    res->heap.top = DEFAULT_USER_HEAP_END;
+    res->heap.size = DEFAULT_USER_HEAP_PAGES * PAGE_SIZE_4K;
 
-    // uint64_t out_rsp;
 
-    // _setup_user_stack_sched_frame(
-    //     (void*)(us_stack_bott + DEFAULT_STACK_PAGE_BYTES),
-    //     k_stack + DEFAULT_STACK_PAGE_BYTES,
-    //     (uint64_t)entry,
-    //     &out_rsp
-    // );
 
-    // return new_pcb(&page_dir, name, &out_rsp,
-    //     (Stack_t){(uintptr_t)k_stack, (uintptr_t)k_stack + DEFAULT_STACK_PAGE_BYTES, DEFAULT_STACK_PAGE_BYTES},
-    //     (Stack_t){us_stack_bott, us_stack_bott + DEFAULT_STACK_PAGE_BYTES, DEFAULT_STACK_PAGE_BYTES});
+
+
+    physptr_t ft_pages = pmm_alloc_pages(256 / (PAGE_SIZE_4K/sizeof(file)));
+    if(!ft_pages) {
+        Sys_Error("task '%s': unable to allocate user file table pages\n", name);
+        return NULL;
+    }
+
+    map_4k_pages(
+        PHYS_2_HHDM(res->cr3),
+        DEFAULT_FILE_TABLE_START, ft_pages,
+        DEFAULT_FILE_TABLE_PAGES, PTE_WRITABLE | PTE_LOCAL_OWNED
+    );
+    
+    res->opened_file_table = DEFAULT_FILE_TABLE_START;
+
+
+
+    Sys_Success("task '%s': created sucesssfully..?\n", name);
+    return res;
 }
-
-
-
-
-
-
-
-
+    
+    
+    
+    
+    
+    
+    
+    
 
 
 
@@ -314,7 +409,7 @@ Linked_PCB_t* us_task_start(void* entry, char* name, physptr_t page_dir) {
 
 
 void* sched_next_process_core(uint64_t saved_rsp) {
-    Linked_PCB_t* current = _scheduler_current_process;
+    linked_pcb* current = _scheduler_current_process;
     current->k_rsp = saved_rsp;
 
 #if SCHEDULER_PROC_LIST_DEBUG
@@ -336,7 +431,7 @@ get_next:
     if (!next_node)
         next_node = _scheduler_process_list_head.first;
 
-    Linked_PCB_t* next = container_of(next_node, Linked_PCB_t, list_node);
+    linked_pcb* next = container_of(next_node, linked_pcb, list_node);
 #if SCHEDULER_TICK_SERIAL_DEBUG
     serial_write_string("running proc ");
     serial_log_hex("",next->pid);
@@ -344,7 +439,8 @@ get_next:
 #endif
     if (next->state & PCB_STATE_ZOMBIE) {
         next_node = next->list_node.next;
-        kill_ktask(next);
+        if(next->cr3 == kernel_pagedir_phys) kill_ktask(next);
+        else kill_us_task(next);
         goto get_next;
     }
 
@@ -352,7 +448,7 @@ get_next:
 
     __asm__ volatile ("mov %0, %%cr3" :: "r"(next->cr3) : "memory");
 
-    setTss_sp(next->k_rsp);
+    set_tss_sp(next->k_rsp);
 
     return (void*)next->k_rsp;
 }

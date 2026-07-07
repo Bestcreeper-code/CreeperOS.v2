@@ -8,7 +8,9 @@
 #include "interrupts/interrupts.h"
 #include "memops.h"
 #include "drivers/drivers.h"
+#include "scheduler/scheduler.h"
 #include "vfs/vfs.h"
+#include "vfs/fs.h"
 
 #include <stdbool.h>
 #include <stddef.h>
@@ -215,6 +217,10 @@ void ps2_keyboard_handler(void* frame) {
         }
         Sys_log_NoPos("%c",ch);
     }
+
+    if(ch=='l') _log_all_processes();
+    if(ch=='t') fs_tree(root_dentry, 0);
+    
     _current_eoi((uint8_t)HARDCODED_PS2_KBD_INTERRUPT_VECTOR_INDEX);
 }
 

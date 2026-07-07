@@ -17,22 +17,34 @@ extern _current_eoi
     mov  rax, cr0
     push rax
 
+    mov   ax, cs
+    cmp   word [rsp + 64], ax
+    je    %%.same_priv
+
+    movzx eax, word [rsp + 88]     ; privilege changed
+    jmp   %%.have_ss
+%%.same_priv:
+    mov   ax, ss                   ; no privilege change
+%%.have_ss:
+
     sub  rsp, 2
-    mov  word [rsp], ss
+    mov  word [rsp], ax            ; ss
     sub  rsp, 2
-    mov  word [rsp], gs
+    mov  word [rsp], ax            ; gs
     sub  rsp, 2
-    mov  word [rsp], fs
+    mov  word [rsp], ax            ; fs
     sub  rsp, 2
-    mov  word [rsp], es
+    mov  word [rsp], ax            ; es
     sub  rsp, 2
-    mov  word [rsp], ds
+    mov  word [rsp], ax            ; ds
+
+    movzx eax, word [rsp + 74]     ; original cs
     sub  rsp, 2
-    mov  word [rsp], cs
+    mov  word [rsp], ax            ; cs
 
     pushfq
 
-    lea  rax, [rel $] ;<<<<<
+    mov  rax, [rsp + 76]
     push rax
 
     push r15
@@ -83,7 +95,6 @@ isr_call_stack  resq MAX_STACK_TRACE_SIZE
 
 section .text
 isr_common_handler:
-
     movzx edi, byte [rsp + 196] ;vector
 
     mov  rax, [rel _current_eoi]
@@ -149,7 +160,7 @@ isr%1:
 global isr%1
 isr%1:
     cli
-    push qword 0
+    
     push qword %1
     SAVE_ALL
     jmp  isr_common_handler

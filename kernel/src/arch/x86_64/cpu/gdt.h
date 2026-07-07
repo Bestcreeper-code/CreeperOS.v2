@@ -50,4 +50,4 @@ struct tss64 {
 
 void init_gdt();
 void init_tss(uintptr_t rsp0);
-void setTss_sp(uintptr_t rsp0);
+void set_tss_sp(uintptr_t rsp0);

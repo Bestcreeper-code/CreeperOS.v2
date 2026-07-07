@@ -126,7 +126,7 @@ void pmm_init() {
     }
 }
 
-uintptr_t pmm_alloc() {
+physptr_t pmm_alloc() {
     pmm_lock_acquire();
 
     size_t bit = bitmap_find_clear();
@@ -136,16 +136,18 @@ uintptr_t pmm_alloc() {
     free_pages--;
 
     pmm_lock_release();
-    return (uintptr_t)bit * PMM_PAGE_SIZE;
+    return (physptr_t)bit * PMM_PAGE_SIZE;
 }
 
-uintptr_t pmm_alloc_zeroed() {
-    uintptr_t phys = pmm_alloc();
+physptr_t pmm_alloc_zeroed() {
+    physptr_t phys = pmm_alloc();
+    if(!phys) return 0;
+    
     memset(PHYS_2_HHDM(phys), 0, PMM_PAGE_SIZE);
     return phys;
 }
 
-void pmm_free(uintptr_t phys) {
+void pmm_free(physptr_t phys) {
     pmm_lock_acquire();
 
     size_t bit = (size_t)(phys / PMM_PAGE_SIZE);
@@ -158,7 +160,7 @@ void pmm_free(uintptr_t phys) {
 }
 
 
-uintptr_t pmm_alloc_pages(size_t count) {
+physptr_t pmm_alloc_pages(size_t count) {
     if (count == 0) return 0;
     if (count == 1) return pmm_alloc();  // fast path
 
@@ -176,13 +178,13 @@ uintptr_t pmm_alloc_pages(size_t count) {
     return (uintptr_t)bit * PMM_PAGE_SIZE;
 }
 
-uintptr_t pmm_alloc_pages_zeroed(size_t count) {
-    uintptr_t phys = pmm_alloc_pages(count);
+physptr_t pmm_alloc_pages_zeroed(size_t count) {
+    physptr_t phys = pmm_alloc_pages(count);
     memset(PHYS_2_HHDM(phys), 0, count * PMM_PAGE_SIZE);
     return phys;
 }
 
-void pmm_free_pages(uintptr_t phys, size_t count) {
+void pmm_free_pages(physptr_t phys, size_t count) {
 
     pmm_lock_acquire();
     

@@ -94,6 +94,7 @@ int initrd_init() {
         info->size       = get_tar_size(header->size);
         info->fixed_size = true;
 
+        new_dentry->inode->i_size = get_tar_size(header->size);;
         new_dentry->inode->i_private = info;
         new_dentry->inode->i_fop    = &ram_file_fops;
     }

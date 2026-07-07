@@ -1,30 +1,27 @@
-#include <stdint.h>
-#include <stddef.h>
-#include <stdbool.h>
-#include <limine.h>
 #include "arch/arch.h"
+#include "arch/vmm.h"
 #include "arch/x86_64/scheduler/scheduler.h"
 #include "asm/asm.h"
+#include "debug/Logger.h"
 #include "defines/types.h"
 #include "drivers/drivers.h"
-#include "drivers/pit/pit.h"
+#include "Flanterm/src/flanterm_backends/fb.h"
+#include "Flanterm/src/flanterm.h"
 #include "initrd_parse/initrd.h"
 #include "memory/memory.h"
-#include "mm/vmm_arch.h"
-#include "string/format.h"
-#include "string/string.h"
-#include "debug/Logger.h"
 #include "memory/pmm.h"
-#include "memops.h"
-#include "arch/vmm.h"
+#include "mm/vmm_arch.h"
+#include "requests.h"
 #include "timer/time.h"
 #include "vfs/fs.h"
+#include "vfs/ramfile.h"
 #include "vfs/sysfs.h"
-#include "printf/printf.h"
-#include "requests.h"
-#include "Flanterm/src/flanterm.h"
-#include "Flanterm/src/flanterm_backends/fb.h"
 #include "vfs/vfs.h"
+
+#include <limine.h>
+#include <stdbool.h>
+#include <stddef.h>
+#include <stdint.h>
 
 // Halt and catch fire function.
 static void hcf(void) {
@@ -185,14 +182,16 @@ void kmain() {
     cli();
     
     core_init();
+    
     sysfs_init();
+
     
     // fs_init();
     scheduler_init();
-    
+    k_ramfile_mkdir("/tmp", 0666);
     
     log_queue_init();
-    Linked_PCB_t* klogger_pcb = ktask_start(_log_manager_thread, "klogger");
+    linked_pcb* klogger_pcb = ktask_start(_log_manager_thread, "klogger");
     if(!klogger_pcb){
         Sys_Error("couldn't init logger thread\n");
         for(;;);
@@ -208,10 +207,10 @@ void kmain() {
 
     
     
-    sti();
     initrd_init();
-        
+    
     dev_init();
+    
     // {  
     //     for(int j = 0; j < 200; j++){
     //         ktask_start(loop, "test-loop");
@@ -223,9 +222,161 @@ void kmain() {
     //     _log_all_processes();
     // }
     
-    us_task_start(init_drivers,"test uspace",pmm_alloc());
+    // for(;;);
+    sti();
+    // enable_scheduler();
+    physptr_t test_pml4 = pmm_alloc_pages_zeroed(1);
+    Sys_Debug("pml4=%p\n", (void*)test_pml4);
 
-    Sys_Warning("Kernel reached halt????\n");
-    for(;;);
+
+    dentry* testbin_file = kpath_lookup(root_dentry->inode, "/initrd/test.bin");
+    Sys_Debug("dentry=%p\n", testbin_file);
+
+    if (!testbin_file) {
+        Sys_Error("lookup failed\n");
+    }
+
+    Sys_Debug("inode=%p\n", testbin_file->inode);
+
+    if (!testbin_file->inode) {
+        Sys_Error("inode null\n");
+    }
+
+    Sys_Debug("i_fop=%p\n", testbin_file->inode->i_fop);
+
+    physptr_t buffer = pmm_alloc_zeroed();
+    Sys_Debug("buffer=%p\n", (void*)buffer);
+
+    if (!buffer) {
+        Sys_Error("buffer alloc failed\n");
+    }
+
+    file* test_fil = kmalloc(sizeof(file));
+    Sys_Debug("file=%p\n", test_fil);
+
+    if (!test_fil) {
+        Sys_Error("file alloc failed\n");
+    }
+
+    int open_ret = testbin_file->inode->i_fop->open(testbin_file->inode, test_fil);
+    Sys_Debug("open_ret=%d\n", open_ret);
+
+    Sys_Debug("after open: f_ops=%p f_inode=%p private=%p\n",
+            test_fil->f_ops,
+            test_fil->f_inode,
+            test_fil->private_data);
+
+    if (open_ret != 0) {
+        Sys_Error("open failed\n");
+    }
+
+    loff_t off = 0;
+
+    Sys_Debug("before read: f_ops=%p read=%p inode_size=%llu\n",
+            test_fil->f_ops,
+            test_fil->f_ops ? test_fil->f_ops->read : NULL,
+            testbin_file->inode->i_size);
+
+    if (!test_fil->f_ops) {
+        Sys_Error("f_ops NULL after open\n");
+    }
+
+    if (!test_fil->f_inode) {
+        Sys_Error("f_inode NULL after open\n");
+    }
+
+    ssize_t r = test_fil->f_ops->read(
+        test_fil,
+        PHYS_2_HHDM(buffer),
+        testbin_file->inode->i_size,
+        &off
+    );
+
+    Sys_Debug("read_ret=%ld off=%ld\n", r, (long)off);
+
+    if (r == (ssize_t)test_fil->f_inode->i_size) {
+        Sys_Debug("read OK\n");
+        map_4k(PHYS_2_HHDM(test_pml4), 0x100000, buffer, PTE_USER|PTE_WRITABLE|PTE_PRESENT);
+    } else {
+        Sys_Error("read mismatch\n");
+    }
+    
+    void dump_userspace_mappings(uint64_t* pml4);
+    dump_userspace_mappings(PHYS_2_HHDM(test_pml4));
+    map_4k(PHYS_2_HHDM(test_pml4), 0x100000, buffer, PTE_USER | PTE_WRITABLE | PTE_LOCAL_OWNED);
+    us_task_start((void*)0x100000,"test uspace", test_pml4);
+   
+    
+    // Sys_Warning("Kernel reached halt????\n");
     hcf();
+}
+
+
+void dump_userspace_mappings(uint64_t* pml4) {
+    Sys_Debug("---- userspace mapping dump (PML4[0..255]) ----\n");
+    Sys_Debug("pml4 virt is %p\n",pml4);
+
+    for (int pml4_i = 0; pml4_i < 256; pml4_i++) {
+        uint64_t pml4_e = pml4[pml4_i];
+        if (!(pml4_e & PTE_PRESENT)) continue;
+
+        uint64_t* pdpt = (uint64_t*)((pml4_e & PTE_ADDR_MASK) + hhdm_offset);
+
+        for (int pdpt_i = 0; pdpt_i < 512; pdpt_i++) {
+            uint64_t pdpt_e = pdpt[pdpt_i];
+            if (!(pdpt_e & PTE_PRESENT)) continue;
+
+            uintptr_t va_pdpt = ((uintptr_t)pml4_i << 39) | ((uintptr_t)pdpt_i << 30);
+
+            if (pdpt_e & PTE_HUGE) {
+                Sys_Debug("1G  VA=%p -> PA=%p  flags: %s %s %s %s\n",
+                    (void*)va_pdpt,
+                    (void*)(pdpt_e & PTE_ADDR_MASK),
+                    (pdpt_e & PTE_WRITABLE) ? "W" : "-",
+                    (pdpt_e & PTE_USER)     ? "U" : "-",
+                    (pdpt_e & PTE_NX)       ? "NX" : "X",
+                    (pdpt_e & PTE_LOCAL_OWNED)  ? "O" : "NO");
+                continue;
+            }
+
+            uint64_t* pd = (uint64_t*)((pdpt_e & PTE_ADDR_MASK) + hhdm_offset);
+
+            for (int pd_i = 0; pd_i < 512; pd_i++) {
+                uint64_t pd_e = pd[pd_i];
+                if (!(pd_e & PTE_PRESENT)) continue;
+
+                uintptr_t va_pd = va_pdpt | ((uintptr_t)pd_i << 21);
+
+                if (pd_e & PTE_HUGE) {
+                    Sys_Debug("2M  VA=%p -> PA=%p  flags: %s %s %s %s\n",
+                        (void*)va_pd,
+                        (void*)(pd_e & PTE_ADDR_MASK),
+                        (pd_e & PTE_WRITABLE) ? "W" : "-",
+                        (pd_e & PTE_USER)     ? "U" : "-",
+                        (pd_e & PTE_NX)       ? "NX" : "X",
+                        (pd_e & PTE_LOCAL_OWNED)  ? "O" : "NO");
+                    continue;
+                }
+
+                uint64_t* pt = (uint64_t*)((pd_e & PTE_ADDR_MASK) + hhdm_offset);
+
+                for (int pt_i = 0; pt_i < 512; pt_i++) {
+                    uint64_t pt_e = pt[pt_i];
+                    if (!(pt_e & PTE_PRESENT)) continue;
+
+                    uintptr_t va = va_pd | ((uintptr_t)pt_i << 12);
+
+                    Sys_Debug("4K  VA=%p -> PA=%p  flags: %s %s %s %s\n",
+                        (void*)va,
+                        (void*)(pt_e & PTE_ADDR_MASK),
+                        (pt_e & PTE_WRITABLE) ? "W" : "-",
+                        (pt_e & PTE_USER)     ? "U" : "-",
+                        (pt_e & PTE_NX)       ? "NX" : "X",
+                        (pt_e & PTE_LOCAL_OWNED)  ? "O" : "NO");
+                }
+            }
+        }
+    }
+
+    Sys_Debug("---- end mapping dump ----\n");
 }

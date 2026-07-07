@@ -52,7 +52,7 @@ int scan_disk_mbr_vfs(struct block_device* blkdev)
 
             sprintf(meta_buf, "%u\n", part->total_sectors);
 
-            ramfile_create(meta_path,
+            k_ramfile_create(meta_path,
                            (uintptr_t)meta_buf,
                            strlen(meta_buf) + 1,
                            S_IFREG | 0444,
