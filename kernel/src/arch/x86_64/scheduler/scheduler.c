@@ -79,18 +79,56 @@ void _free_pid(pid_t pid) {
 
 #define SCHED_LOG_INTERVAL 2000U
 
-void _log_all_processes() {
+void _log_all_processes(void) {
     Sys_log("process list\n");
+    Sys_log("-----------------------------------------------------------------------------------------------\n");
+    
+
     struct hlist_node *n = _scheduler_process_list_head.first;
     while (n) {
         linked_pcb *p = container_of(n, linked_pcb, list_node);
-        Sys_log("  pid=%-4u  state=0x%02x  name=%s\n",
-                (unsigned)p->pid, (unsigned)p->state, p->name);
+
+        Sys_log(
+            "pid=%u "
+            "state=0x%04x "
+            "name=%s "
+            "cr3=0x%016llx "
+            "k_rsp=0x%016llx "
+            "heap=[0x%016llx-0x%016llx] (%zu) "
+            "kstack=[0x%016llx-0x%016llx] (%zu) "
+            "ustack=[0x%016llx-0x%016llx] (%zu) "
+            "files=%p "
+            "cwd=%p "
+            "exit=%d "
+            "list_node=%p\n",
+            (unsigned)p->pid,
+            (unsigned)p->state,
+            p->name ? p->name : "(null)",
+            (unsigned long long)p->cr3,
+            (unsigned long long)p->k_rsp,
+        
+            (unsigned long long)p->heap.bottom,
+            (unsigned long long)p->heap.top,
+            p->heap.size,
+        
+            (unsigned long long)p->kernel_stack.bottom,
+            (unsigned long long)p->kernel_stack.top,
+            p->kernel_stack.size,
+        
+            (unsigned long long)p->user_stack.bottom,
+            (unsigned long long)p->user_stack.top,
+            p->user_stack.size,
+        
+            (void *)p->opened_file_table,
+            (void *)p->cwd_i,
+            p->exit_code,
+            (void *)&p->list_node
+        );
         n = n->next;
     }
-    Sys_log("\n");
-}
 
+    Sys_log("-----------------------------------------------------------------------------------------------\n\n");
+}
 
 
 
@@ -270,6 +308,82 @@ linked_pcb* ktask_start(void* entry, char* name) {
 
 
 
+
+
+
+
+
+
+
+
+
+
+
+static size_t _argv_len(char** arr) {
+    size_t n = 0;
+    if (arr) while (arr[n]) n++;
+    return n;
+}
+
+static bool _setup_user_args(uint64_t* p_dir, char** argv, char** envp,
+                              uint64_t* out_argc,
+                              uint64_t* out_argv_uva,
+                              uint64_t* out_envp_uva) {
+    size_t argc = _argv_len(argv);
+    size_t envc = _argv_len(envp);
+
+    size_t argv_ptrs_size = (argc + 1) * sizeof(char*);
+    size_t envp_ptrs_size = (envc + 1) * sizeof(char*);
+
+    size_t str_bytes = 0;
+    for (size_t i = 0; i < argc; i++) str_bytes += strlen(argv[i]) + 1;
+    for (size_t i = 0; i < envc; i++) str_bytes += strlen(envp[i]) + 1;
+
+    size_t total = argv_ptrs_size + envp_ptrs_size + str_bytes;
+    size_t page_count = (total + PAGE_SIZE_4K - 1) / PAGE_SIZE_4K;
+    if (page_count == 0) page_count = 1;
+    if (page_count > USER_ARGS_MAX_PAGES) return false;
+
+    physptr_t args_pages = pmm_alloc_pages(page_count);
+    if (!args_pages) return false;
+
+    map_4k_pages(p_dir, USER_ARGS_USPACE_ADDR, args_pages, page_count,
+                 PTE_USER | PTE_WRITABLE | PTE_NX | PTE_LOCAL_OWNED);
+
+    
+    uint8_t* kbase = (uint8_t*)PHYS_2_HHDM(args_pages);
+    memset(kbase, 0, page_count * PAGE_SIZE_4K);
+
+    uint64_t* k_argv_ptrs = (uint64_t*)kbase;
+    uint64_t* k_envp_ptrs = (uint64_t*)(kbase + argv_ptrs_size);
+    uint8_t*  k_strings   = kbase + argv_ptrs_size + envp_ptrs_size;
+    uint64_t  strings_uva = USER_ARGS_USPACE_ADDR + argv_ptrs_size + envp_ptrs_size;
+    size_t    str_off     = 0;
+
+    for (size_t i = 0; i < argc; i++) {
+        size_t len = strlen(argv[i]) + 1;
+        memcpy(k_strings + str_off, argv[i], len);
+        k_argv_ptrs[i] = strings_uva + str_off;
+        str_off += len;
+    }
+    k_argv_ptrs[argc] = 0;
+
+    for (size_t i = 0; i < envc; i++) {
+        size_t len = strlen(envp[i]) + 1;
+        memcpy(k_strings + str_off, envp[i], len);
+        k_envp_ptrs[i] = strings_uva + str_off;
+        str_off += len;
+    }
+    k_envp_ptrs[envc] = 0;
+
+    *out_argc     = argc;
+    *out_argv_uva = USER_ARGS_USPACE_ADDR;
+    *out_envp_uva = USER_ARGS_USPACE_ADDR + argv_ptrs_size;
+    return true;
+}
+
+
+
 void _build_user_stack_frame(uint64_t** stack_top, uint64_t entry,
                         uint64_t user_rsp, uint16_t cs, uint16_t ss) {
     uint64_t base = (uint64_t)*stack_top;
@@ -287,7 +401,11 @@ void _build_user_stack_frame(uint64_t** stack_top, uint64_t entry,
     *stack_top = (uint64_t*)frame;
 }
 
-linked_pcb* us_task_start(void* entry, char* name, physptr_t page_dir) {
+
+
+
+linked_pcb* us_task_start(void* entry, char* name, physptr_t page_dir,
+                           char** argv, char** envp) {
     Sys_Debug("Starting user task '%s'(cr3: %p)\n", name, (void*)page_dir);
     if (!page_dir) {
         Sys_Error("task '%s': no page directory provided\n", name);
@@ -312,40 +430,48 @@ linked_pcb* us_task_start(void* entry, char* name, physptr_t page_dir) {
         return NULL;
     }
 
-
-    uintptr_t us_stack_bott = us_stack_pages;   // no PAGE_TO_ADDR
+    uintptr_t us_stack_bott = us_stack_pages;
 
     for (int i = 0; i < DEFAULT_STACK_PAGE_AMOUNT; i++) {
         uintptr_t page_addr = us_stack_bott + i * PAGE_SIZE_4K;
         map_4k(p_dir, STACK_UPPER_USPACE_ADDR - (DEFAULT_STACK_PAGE_BYTES - i * PAGE_SIZE_4K),
-            page_addr, PTE_WRITABLE | PTE_NX | PTE_USER | PTE_LOCAL_OWNED);   // no ADDR_TO_PAGE
+            page_addr, PTE_WRITABLE | PTE_NX | PTE_USER | PTE_LOCAL_OWNED);
     }
+
     
-    
+    uint64_t u_argc = 0, u_argv = 0, u_envp = 0;
+    if (!_setup_user_args(p_dir, argv, envp, &u_argc, &u_argv, &u_envp)) {
+        Sys_Error("task '%s': unable to set up argv/envp\n", name);
+        return NULL;
+    }
+
     uint64_t* stack_top = (uint64_t*)(k_stack + DEFAULT_STACK_PAGE_BYTES);
-    
+
     _build_user_stack_frame(
         &stack_top,
         (uint64_t)entry,
         STACK_UPPER_USPACE_ADDR,
         USER_CODE_SEGMENT, USER_DATA_SEGMENT
     );
+
     
-    
+    process_stack_frame* frame = (process_stack_frame*)stack_top;
+    frame->rdi = u_argc;
+    frame->rsi = u_argv;
+    frame->rdx = u_envp;
+
     linked_pcb* res = new_pcb(
         page_dir,
         name,
         (uint64_t*)&stack_top,
         (stack_t){
-            .bottom = (uintptr_t)k_stack, 
-            .top = (uintptr_t)k_stack + DEFAULT_STACK_PAGE_BYTES, 
-
+            .bottom = (uintptr_t)k_stack,
+            .top = (uintptr_t)k_stack + DEFAULT_STACK_PAGE_BYTES,
             .size = DEFAULT_STACK_PAGE_BYTES
         },
         (stack_t){
             .bottom = us_stack_bott,
-            .top = us_stack_bott + DEFAULT_STACK_PAGE_BYTES, 
-            
+            .top = us_stack_bott + DEFAULT_STACK_PAGE_BYTES,
             .size = DEFAULT_STACK_PAGE_BYTES
         }
     );
@@ -355,7 +481,7 @@ linked_pcb* us_task_start(void* entry, char* name, physptr_t page_dir) {
 
 
 
-    physptr_t heap_pages = pmm_alloc_pages(256 / (PAGE_SIZE_4K/sizeof(file)));
+    physptr_t heap_pages = pmm_alloc_pages(DEFAULT_USER_HEAP_PAGES);
     if(!heap_pages) {
         Sys_Error("task '%s': unable to allocate user heap pages\n", name);
         return NULL;

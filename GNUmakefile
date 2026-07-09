@@ -1,5 +1,5 @@
 .SUFFIXES:
-QEMUFLAGS := -m 2G #-enable-kvm
+QEMUFLAGS := -m 2G -enable-kvm
 override IMAGE_NAME := OSecond
 INITRD_PATH := kernel/src/_initrd
 

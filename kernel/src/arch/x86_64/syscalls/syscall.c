@@ -1,14 +1,20 @@
+#include "arch/vmm.h"
 #include "asm/asm.h"
 #include "config.h"
 #include "cpu/gdt.h"
 #include "debug/Logger.h"
 #include "defines/compiler_defs.h"
 #include "defines/err_codes.h"
+#include "defines/types.h"
 #include "drivers/drivers.h"
 #include "memory/memory.h"
+#include "memory/pmm.h"
+#include "mm/vmm_arch.h"
 #include "scheduler/scheduler.h"
 #include "vfs/fs.h"
 #include "vfs/vfs.h"
+#include <stddef.h>
+#include <stdint.h>
 #include "syscall.h"
 
 #define MSR_STAR            0xC0000081
@@ -36,7 +42,7 @@ int syscall_init() {
 REGISTER_DRIVER_CORE(syscalls, syscall_init);
 
 
-int syscall_handler(
+ssize_t syscall_handler(
     register_t rax, //syscall number
     register_t rdi, //arg1
     register_t rsi, //arg2
@@ -46,24 +52,30 @@ int syscall_handler(
     register_t r9,  //arg6
     register_t rsp  //stack ptr
 ) {
-// #if (SYSCALL_DEBUG)
-//     Sys_Debug("syscall: rax=%#lx, rdi=%#lx, rsi=%#lx, rdx=%#lx, r10=%#lx, r8=%#lx, r9=%#lx \n",
-//         rax, rdi, rsi, rdx, r10, r8, r9);
-// #endif
+#if (SYSCALL_DEBUG)
+    Sys_Debug("syscall: rax=%#lx, rdi=%#lx, rsi=%#lx, rdx=%#lx, r10=%#lx, r8=%#lx, r9=%#lx \n",
+        rax, rdi, rsi, rdx, r10, r8, r9);
+#endif
 
     switch (rax) {
 
         case 0: // sys_read
-            return sys_read(rdi, rsi, rdx);
+            return sys_read(rdi, (__user void*)rsi, rdx);
 
         case 1: // sys_write
-            return sys_write(rdi, rsi, rdx);
+            return sys_write(rdi, (const __user void*)rsi, rdx);
 
         case 2: // sys_open
-            return sys_open(rdi, rsi, rdx);
+            return sys_open((const __user char*)rdi, rsi, rdx);
 
         case 3: // sys_close
             return sys_close(rdi);
+
+        case 8:
+            return sys_lseek(rdi, rsi, rdx);
+        
+        case 12:
+            return sys_brk(rdi);
 
         case 24: // sys_sched_yield
             // yield_core(rsp);
@@ -75,16 +87,16 @@ int syscall_handler(
             return 0;
 
         case 83: // sys_mkdir
-            return sys_mkdir(rdi, rsi);
+            return sys_mkdir((const __user char*)rdi, rsi);
 
         case 84: // sys_rmdir
-            return sys_rmdir(rdi);
+            return sys_rmdir((const __user char*)rdi);
 
         case 85: // sys_creat
-            return sys_create(rdi, rsi);
+            return sys_create((const __user char*)rdi, rsi);
 
         case 87: // sys_unlink
-            return sys_unlink(rdi);
+            return sys_unlink((const __user char*)rdi);
 
         default:
 #if (SYSCALL_DEBUG)
@@ -99,9 +111,9 @@ int syscall_handler(
 
 
 int sys_open(
-    register_t filename,
-    register_t flags,
-    register_t mode
+    const __user char* filename,
+    int flags,
+    int mode
 ) {
 #if (SYSCALL_DEBUG)
     Sys_Debug("open called: filename=%p, flags=%x, mode=%o\n",
@@ -109,7 +121,7 @@ int sys_open(
 #endif
 
     if (!filename)
-        return -E_INVAL;
+        return -E_INVAL+1;
 
     if (!_scheduler_current_process->opened_file_table)
         return -E_INVAL;
@@ -169,9 +181,9 @@ int sys_open(
 
 
 ssize_t sys_read(
-    register_t fd,
-    register_t buf,
-    register_t count
+    int fd,
+    __user void* buf,
+    size_t count
 ) {
 #if (SYSCALL_DEBUG)
     Sys_Debug("read called: fd=%d, buf=%p, count=%ld\n",
@@ -214,15 +226,19 @@ ssize_t sys_read(
     return ret;
 }
 
-int sys_write(
-    register_t fd,
-    register_t buf,
-    register_t count
+ssize_t sys_write(
+    int fd,
+    const __user void* buf,
+    size_t count
 ) {
 #if (SYSCALL_DEBUG)
     Sys_Debug("write called: fd=%d, buf=%p, count=%ld\n",
         (int)fd, (void*)buf, count);
 #endif
+    if(fd==1) {
+        Sys_log_NoPos("%.*s",(int)count, (char*)buf);
+        return count;
+    }
 
     if (!buf)
         return -E_INVAL;
@@ -233,10 +249,6 @@ int sys_write(
     if (fd >= DEFAULT_FILE_TABLE_ENTRIES)
         return -E_INVAL;
     
-    if(fd==1) {
-        Sys_Warning("[print] %.*s",(int)count, (char*)buf);
-        return count;
-    }
     file *fil = &((file*)_scheduler_current_process->opened_file_table)[fd];
 
     if (!fil->f_inode || !fil->f_ops || !fil->f_ops->write)
@@ -262,7 +274,10 @@ int sys_write(
     return ret;
 }
 
-int sys_close(register_t fd) {
+
+int sys_close(
+    int fd
+) {
 #if (SYSCALL_DEBUG)
     Sys_Debug("close called: fd=%d\n", (int)fd);
 #endif
@@ -294,7 +309,100 @@ int sys_close(register_t fd) {
     return ret;
 }
 
-int sys_mkdir(register_t path, register_t mode) {
+
+
+loff_t sys_lseek(
+    unsigned int fd,
+    loff_t offset,
+    unsigned int origin
+) {
+
+    if (!_scheduler_current_process->opened_file_table)
+        return -E_INVAL;
+
+    if (fd >= DEFAULT_FILE_TABLE_ENTRIES)
+        return -E_INVAL;
+
+    file* fil = &((file*)_scheduler_current_process->opened_file_table)[fd];
+
+    if (!fil->f_inode )
+        return -E_INVAL;
+
+    switch (origin) {
+        case SEEK_SET:
+            fil->f_pos = offset;
+            return offset;
+            
+        case SEEK_CUR:
+            fil->f_pos += offset;
+            return fil->f_pos;
+            
+        case SEEK_END:
+            fil->f_pos = fil->f_inode->i_size + offset;
+            return fil->f_pos;
+            
+    }
+}
+
+
+
+uintptr_t sys_brk(size_t brk) {
+    heap_t *heap = &_scheduler_current_process->heap;
+
+    if (brk == 0)
+        return heap->top;
+
+    if (brk < heap->bottom)
+        return -E_INVAL;
+
+    uintptr_t old = heap->top;
+
+    uintptr_t old_page = (old + PAGE_SIZE_4K - 1) & ~(PAGE_SIZE_4K - 1);
+    uintptr_t new_page = (brk + PAGE_SIZE_4K - 1) & ~(PAGE_SIZE_4K - 1);
+
+    if (new_page > old_page) {
+        size_t pages = (new_page - old_page) / PAGE_SIZE_4K;
+
+        uintptr_t phys = pmm_alloc_pages(pages);
+        if (!phys)
+            return -E_NOMEM;
+
+        map_4k_pages(
+            PHYS_2_HHDM(_scheduler_current_process->cr3),
+            old_page,
+            phys,
+            pages,
+            PTE_WRITABLE | PTE_USER
+        );
+    }
+    else if (new_page < old_page) {
+        //unmap later
+    }
+
+    heap->top = brk;
+    heap->size = heap->top - heap->bottom;
+
+    return heap->top;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+int sys_mkdir(
+    const __user char* path,
+    int mode
+) {
 #if (SYSCALL_DEBUG)
     Sys_Debug("mkdir called: path=%p, mode=%o\n", (void*)path, (unsigned)mode);
 #endif
@@ -313,7 +421,10 @@ int sys_mkdir(register_t path, register_t mode) {
     return kpath_mkdir(start, kpath, (umode_t)mode);
 }
 
-int sys_create(register_t path, register_t mode) {
+int sys_create(
+    const __user char* path,
+    int mode
+) {
 #if (SYSCALL_DEBUG)
     Sys_Debug("create called: path=%p, mode=%o\n", (void*)path, (unsigned)mode);
 #endif
@@ -332,7 +443,9 @@ int sys_create(register_t path, register_t mode) {
     return kpath_create(start, kpath, (umode_t)mode, false);
 }
 
-int sys_rmdir(register_t path) {
+int sys_rmdir(
+    const __user char* path
+) {
 #if (SYSCALL_DEBUG)
     Sys_Debug("rmdir called: path=%p\n", (void*)path);
 #endif
@@ -360,7 +473,9 @@ int sys_rmdir(register_t path) {
     return ret;
 }
 
-int sys_unlink(register_t path) {
+int sys_unlink(
+    const __user char* path
+) {
 #if (SYSCALL_DEBUG)
     Sys_Debug("unlink called: path=%p\n", (void *)path);
 #endif
@@ -392,7 +507,10 @@ int sys_unlink(register_t path) {
 
 
 
-void sys_exit(register_t code, register_t rsp) {
+void sys_exit(  
+    int code,
+    register_t rsp
+) {
     _scheduler_current_process->exit_code = code;
     _scheduler_current_process->state     = PCB_STATE_ZOMBIE;
 

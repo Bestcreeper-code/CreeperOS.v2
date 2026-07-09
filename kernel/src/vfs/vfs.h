@@ -154,8 +154,8 @@ typedef struct dentry {
 extern struct inode_operations def_vfs_i_ops;
 extern struct dentry* root_dentry;
 
-struct dentry *vfs_lookup(struct inode* dir, struct dentry* file, unsigned int flags);
-int vfs_create(struct inode *dir, struct dentry *dentry, umode_t mode, bool excl);
-int vfs_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode);
+struct dentry* vfs_lookup(struct inode* dir, struct dentry* file, unsigned int flags);
+int vfs_create(struct inode* dir, struct dentry* dentry, umode_t mode, bool excl);
+int vfs_mkdir(struct inode* dir, struct dentry* dentry, umode_t mode);
 
 int vfs_inv_func();

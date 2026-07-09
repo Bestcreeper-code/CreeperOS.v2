@@ -7,11 +7,13 @@
 #include "drivers/drivers.h"
 #include "Flanterm/src/flanterm_backends/fb.h"
 #include "Flanterm/src/flanterm.h"
+#include "executable/bin_exec/bin_exec.h"
 #include "initrd_parse/initrd.h"
 #include "memory/memory.h"
 #include "memory/pmm.h"
 #include "mm/vmm_arch.h"
 #include "requests.h"
+#include "syscalls/syscall.h"
 #include "timer/time.h"
 #include "vfs/fs.h"
 #include "vfs/ramfile.h"
@@ -199,18 +201,18 @@ void kmain() {
         Sys_Success("klogger started as pid:%d\n",klogger_pcb->pid);
         // for(;;);
     }
-    
     // for(int i = 0; i < 22; i++){
-    //     hlt();
-    // }
-
-
-    
-    
+        //     hlt();
+        // }
+        
+        
+        
+        
     initrd_init();
     
     dev_init();
     
+    sti();
     // {  
     //     for(int j = 0; j < 200; j++){
     //         ktask_start(loop, "test-loop");
@@ -223,91 +225,22 @@ void kmain() {
     // }
     
     // for(;;);
-    sti();
-    // enable_scheduler();
-    physptr_t test_pml4 = pmm_alloc_pages_zeroed(1);
-    Sys_Debug("pml4=%p\n", (void*)test_pml4);
-
-
-    dentry* testbin_file = kpath_lookup(root_dentry->inode, "/initrd/test.bin");
-    Sys_Debug("dentry=%p\n", testbin_file);
-
-    if (!testbin_file) {
-        Sys_Error("lookup failed\n");
-    }
-
-    Sys_Debug("inode=%p\n", testbin_file->inode);
-
-    if (!testbin_file->inode) {
-        Sys_Error("inode null\n");
-    }
-
-    Sys_Debug("i_fop=%p\n", testbin_file->inode->i_fop);
-
-    physptr_t buffer = pmm_alloc_zeroed();
-    Sys_Debug("buffer=%p\n", (void*)buffer);
-
-    if (!buffer) {
-        Sys_Error("buffer alloc failed\n");
-    }
-
-    file* test_fil = kmalloc(sizeof(file));
-    Sys_Debug("file=%p\n", test_fil);
-
-    if (!test_fil) {
-        Sys_Error("file alloc failed\n");
-    }
-
-    int open_ret = testbin_file->inode->i_fop->open(testbin_file->inode, test_fil);
-    Sys_Debug("open_ret=%d\n", open_ret);
-
-    Sys_Debug("after open: f_ops=%p f_inode=%p private=%p\n",
-            test_fil->f_ops,
-            test_fil->f_inode,
-            test_fil->private_data);
-
-    if (open_ret != 0) {
-        Sys_Error("open failed\n");
-    }
-
-    loff_t off = 0;
-
-    Sys_Debug("before read: f_ops=%p read=%p inode_size=%llu\n",
-            test_fil->f_ops,
-            test_fil->f_ops ? test_fil->f_ops->read : NULL,
-            testbin_file->inode->i_size);
-
-    if (!test_fil->f_ops) {
-        Sys_Error("f_ops NULL after open\n");
-    }
-
-    if (!test_fil->f_inode) {
-        Sys_Error("f_inode NULL after open\n");
-    }
-
-    ssize_t r = test_fil->f_ops->read(
-        test_fil,
-        PHYS_2_HHDM(buffer),
-        testbin_file->inode->i_size,
-        &off
-    );
-
-    Sys_Debug("read_ret=%ld off=%ld\n", r, (long)off);
-
-    if (r == (ssize_t)test_fil->f_inode->i_size) {
-        Sys_Debug("read OK\n");
-        map_4k(PHYS_2_HHDM(test_pml4), 0x100000, buffer, PTE_USER|PTE_WRITABLE|PTE_PRESENT);
-    } else {
-        Sys_Error("read mismatch\n");
-    }
+    char* test_argv[] = {
+        "/bin/test_task",
+        "--foo",
+        "bar",
+        NULL
+    };
     
-    void dump_userspace_mappings(uint64_t* pml4);
-    dump_userspace_mappings(PHYS_2_HHDM(test_pml4));
-    map_4k(PHYS_2_HHDM(test_pml4), 0x100000, buffer, PTE_USER | PTE_WRITABLE | PTE_LOCAL_OWNED);
-    us_task_start((void*)0x100000,"test uspace", test_pml4);
-   
+    char* test_envp[] = {
+        NULL
+    };
+    bin_exec_raw("/initrd/test.bin", 0x100000,
+        test_argv, test_envp);
     
-    // Sys_Warning("Kernel reached halt????\n");
+    Sys_Warning("Kernel reached halt????\n");
+    kill_ktask(_scheduler_current_process);
+    for(;;) sti();
     hcf();
 }
 

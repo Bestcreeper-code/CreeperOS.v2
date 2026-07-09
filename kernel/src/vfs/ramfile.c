@@ -43,7 +43,7 @@ int ramfile_open(struct inode* inode, struct file* file) {
     return 0;
 }
 
-ssize_t ramfile_read(struct file *file, char *buf, size_t count, loff_t *offset) {
+ssize_t ramfile_read(struct file* file, char* buf, size_t count, loff_t* offset) {
     RET_IF(!file, -E_INVAL);
 
     struct ramfile_info* info = file->f_inode->i_private;
@@ -60,11 +60,11 @@ ssize_t ramfile_read(struct file *file, char *buf, size_t count, loff_t *offset)
     return bytes_to_read;
 }
 
-ssize_t ramfile_write(struct file *file, const char *buf, size_t count, loff_t *offset)
+ssize_t ramfile_write(struct file* file, const char* buf, size_t count, loff_t* offset)
 {
     RET_IF(!file || !buf || !offset, -E_INVAL);
 
-    struct ramfile_info *info = file->f_inode->i_private;
+    struct ramfile_info* info = file->f_inode->i_private;
     RET_IF(!info, -E_INVAL);
 
     size_t pos = (size_t)*offset;
@@ -83,28 +83,40 @@ ssize_t ramfile_write(struct file *file, const char *buf, size_t count, loff_t *
         return to_write;
     }
 
-    size_t new_size = info->size + count;
+    if (count == 0) {
+        *offset += 0;
+        return 0;
+    }
 
-    void *new_mem = krealloc_impl((void*)info->start, new_size);
-    if (!new_mem)
-        return -E_NOMEM;
+    if (pos + count < pos)
+        return -E_INVAL;
 
-    info->start = (uintptr_t)new_mem;
+    size_t new_end = pos + count;
 
-    size_t tail_len = info->size - pos;
-    memmove((void*)(info->start + pos + count),
-            (void*)(info->start + pos),
-            tail_len);
+    if (new_end <= info->size) {
+        memcpy((void*)(info->start + pos), buf, count);
+    } else {
+        void* new_mem = krealloc_impl((void*)info->start, new_end);
+        if (!new_mem)
+            return -E_NOMEM;
 
-    memcpy((void*)(info->start + pos), buf, count);
+        info->start = (uintptr_t)new_mem;
 
-    info->size = new_size;
+        if (pos > info->size) {
+            memset((void*)(info->start + info->size), 0, pos - info->size);
+        }
+
+        memcpy((void*)(info->start + pos), buf, count);
+
+        info->size = new_end;
+        file->f_inode->i_size = new_end;
+    }
+
     *offset += count;
-
     return count;
 }
 
-int ramfile_release(struct inode *inode, struct file *file)
+int ramfile_release(struct inode* inode, struct file* file)
 {
     (void)inode;
 
@@ -113,7 +125,7 @@ int ramfile_release(struct inode *inode, struct file *file)
 
     file->private_data = NULL;
     file->f_ops = NULL;
-
+ 
     return 0;
 }
 
@@ -124,11 +136,11 @@ int k_ramfile_create(const char* path, uintptr_t start, size_t size,
     int res = kpath_create_force(root_dentry->inode, path, mode, excl);
     RET_IF(res < 0, res);
 
-    struct dentry *dentry = kpath_lookup(root_dentry->inode, path);
+    struct dentry* dentry = kpath_lookup(root_dentry->inode, path);
     RET_IF(!dentry, -E_NOENT);
     RET_IF(!dentry->inode, -E_NOENT);
 
-    struct ramfile_info *info = kmalloc(sizeof(struct ramfile_info));
+    struct ramfile_info* info = kmalloc(sizeof(struct ramfile_info));
     RET_IF(!info, -E_NOMEM);
 
     info->start = start;
@@ -149,7 +161,7 @@ int k_ramfile_mkdir(const char* path, umode_t mode) {
     int res = kpath_mkdir(root_dentry->inode, path, mode);
     RET_IF(res < 0, res);
 
-    struct dentry *dentry = kpath_lookup(root_dentry->inode, path);
+    struct dentry* dentry = kpath_lookup(root_dentry->inode, path);
     RET_IF(!dentry, -E_NOENT);
     RET_IF(!dentry->inode, -E_NOENT);
 
@@ -163,7 +175,7 @@ int k_ramfile_mkdir(const char* path, umode_t mode) {
 
 
 
-int ramfile_inode_create(struct inode *dir, struct dentry *dentry, umode_t mode, bool excl) {
+int ramfile_inode_create(struct inode* dir, struct dentry* dentry, umode_t mode, bool excl) {
     RET_IF(!dir || !dentry, -E_INVAL);
 
     if (excl && dentry->inode)
@@ -172,7 +184,7 @@ int ramfile_inode_create(struct inode *dir, struct dentry *dentry, umode_t mode,
     int res = vfs_create(dir, dentry, S_IFREG | (mode & ~S_IFMT), excl);
     RET_IF(res < 0, res);
 
-    struct ramfile_info *info = kmalloc(sizeof(struct ramfile_info));
+    struct ramfile_info* info = kmalloc(sizeof(struct ramfile_info));
     if (!info) {
         kfree(dentry->inode);
         dentry->inode = NULL;
@@ -190,7 +202,7 @@ int ramfile_inode_create(struct inode *dir, struct dentry *dentry, umode_t mode,
     return 0;
 }
 
-int ramfile_inode_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode) {
+int ramfile_inode_mkdir(struct inode* dir, struct dentry* dentry, umode_t mode) {
     RET_IF(!dir || !dentry, -E_INVAL);
 
     int res = vfs_create(dir, dentry, S_IFDIR | (mode & ~S_IFMT), false);
@@ -203,10 +215,10 @@ int ramfile_inode_mkdir(struct inode *dir, struct dentry *dentry, umode_t mode) 
     return 0;
 }
 
-int ramfile_inode_rmdir(struct inode *dir, struct dentry *dentry) {
+int ramfile_inode_rmdir(struct inode* dir, struct dentry* dentry) {
     RET_IF(!dir || !dentry, -E_INVAL);
 
-    struct dentry *target = vfs_lookup(dir, dentry, 0);
+    struct dentry* target = vfs_lookup(dir, dentry, 0);
     RET_IF(!target, -E_NOENT);
     RET_IF(!S_ISDIR(target->inode->i_mode), -E_NOTDIR);
     RET_IF(target->d_children.first, -E_NOTEMPTY);
@@ -221,16 +233,16 @@ int ramfile_inode_rmdir(struct inode *dir, struct dentry *dentry) {
     return 0;
 }
 
-int ramfile_inode_unlink(struct inode *dir, struct dentry *dentry) {
+int ramfile_inode_unlink(struct inode* dir, struct dentry* dentry) {
     RET_IF(!dir || !dentry, -E_INVAL);
 
-    struct dentry *target = vfs_lookup(dir, dentry, 0);
+    struct dentry* target = vfs_lookup(dir, dentry, 0);
     RET_IF(!target, -E_NOENT);
     RET_IF(S_ISDIR(target->inode->i_mode), -E_ISDIR);
 
     hlist_del(&target->d_sib);
 
-    struct ramfile_info *info = target->inode->i_private;
+    struct ramfile_info* info = target->inode->i_private;
     if (info) {
         if (!info->fixed_size && info->start)
             kfree((void*)info->start);

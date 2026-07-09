@@ -2,10 +2,13 @@
 #define SYSCALLS_H
 
 #include "asm/asm.h"
+#include "defines/compiler_defs.h"
 #include "defines/types.h"
 
 
-int syscall_handler(
+
+
+ssize_t syscall_handler(
     register_t rax, //syscall number
     register_t rdi, //arg1
     register_t rsi, //arg2
@@ -16,40 +19,66 @@ int syscall_handler(
     register_t rsp  //stack ptr
 );
 
+
 int sys_open(
-    register_t filename,
-    register_t flags,
-    register_t mode
+    const __user char* filename,
+    int flags,
+    int mode
 );
 
-int sys_write(
-    register_t fd,
-    register_t buf,
-    register_t count
+ssize_t sys_write(
+    int fd,
+    const __user void* buf,
+    size_t count
 );
 
 ssize_t sys_read(
-    register_t fd,
-    register_t buf,
-    register_t count
+    int fd,
+    __user void* buf,
+    size_t count
 );
 
-int sys_close(register_t fd);
+int sys_close(
+    int fd
+);
+
+#define SEEK_SET       0
+#define SEEK_CUR       1
+#define SEEK_END       2
+loff_t sys_lseek(
+    unsigned int fd,
+    loff_t offset,
+    unsigned int origin
+);
 
 
+uintptr_t sys_brk(
+    size_t brk
+);
 
-int sys_mkdir(register_t path, register_t mode);
+int sys_mkdir(
+    const __user char* path,
+    int mode
+);
 
-int sys_create(register_t path, register_t mode);
+int sys_create(
+    const __user char* path,
+    int mode
+);
 
-int sys_rmdir(register_t path);
+int sys_rmdir(
+    const __user char* path
+);
 
-int sys_unlink(register_t path);
+int sys_unlink(
+    const __user char* path
+);
 
 void sys_exit(
-    register_t code,
+    int code,
     register_t rsp
 );
+
 
 
 #endif // SYSCALLS_H

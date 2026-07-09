@@ -230,6 +230,65 @@ uintptr_t vmm_virt_to_phys(uintptr_t vaddr) {
     return result;
 }
 
+uintptr_t page_dir_virt_to_phys(uint64_t* pml4, uintptr_t vaddr) {
+    vmm_lock_acquire();
+
+    uint64_t pdpt_e = pml4[PML4_INDEX(vaddr)];
+    if (!(pdpt_e & PTE_PRESENT)) {
+        vmm_lock_release();
+        return UINTPTR_MAX;
+    }
+
+    uint64_t* pdpt = (uint64_t*)PHYS_2_HHDM(pdpt_e & PTE_ADDR_MASK);
+
+    uint64_t pd_e = pdpt[PDPT_INDEX(vaddr)];
+    if (!(pd_e & PTE_PRESENT)) {
+        vmm_lock_release();
+        return UINTPTR_MAX;
+    }
+
+    if (pd_e & PTE_HUGE) {
+        uintptr_t result =
+            (pd_e & PTE_ADDR_MASK) |
+            (vaddr & (PAGE_SIZE_1G - 1));
+
+        vmm_lock_release();
+        return result;
+    }
+
+    uint64_t* pd = (uint64_t*)PHYS_2_HHDM(pd_e & PTE_ADDR_MASK);
+
+    uint64_t pt_e = pd[PD_INDEX(vaddr)];
+    if (!(pt_e & PTE_PRESENT)) {
+        vmm_lock_release();
+        return UINTPTR_MAX;
+    }
+
+    if (pt_e & PTE_HUGE) {
+        uintptr_t result =
+            (pt_e & PTE_ADDR_MASK) |
+            (vaddr & (PAGE_SIZE_2M - 1));
+
+        vmm_lock_release();
+        return result;
+    }
+
+    uint64_t* pt = (uint64_t*)PHYS_2_HHDM(pt_e & PTE_ADDR_MASK);
+
+    uint64_t page_e = pt[PT_INDEX(vaddr)];
+    if (!(page_e & PTE_PRESENT)) {
+        vmm_lock_release();
+        return UINTPTR_MAX;
+    }
+
+    uintptr_t result =
+        (page_e & PTE_ADDR_MASK) |
+        (vaddr & (PAGE_SIZE_4K - 1));
+
+    vmm_lock_release();
+    return result;
+}
+
 static uint64_t* get_current_pml4() {
     uintptr_t cr3 = cr3_get();
     return (uint64_t* )(cr3 + hhdm_offset);

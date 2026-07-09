@@ -1,6 +1,4 @@
-#ifndef SCHEDULER_H
-#define SCHEDULER_H
-
+#pragma once
 #include "arch/vmm.h"
 #include "asm/asm.h"
 #include "defines/lists.h"
@@ -29,6 +27,12 @@
 #define DEFAULT_USER_HEAP_END       (0x0000600000000000 + \
                 DEFAULT_USER_HEAP_PAGES * PAGE_SIZE_4K)
 
+                
+#define USER_ARGS_MAX_PAGES         16
+#define USER_ARGS_USPACE_ADDR       ((DEFAULT_USER_HEAP_START - PAGE_SIZE_4K*(USER_ARGS_MAX_PAGES+1)))
+
+
+
 typedef short pid_t;
 
 typedef struct linked_pcb_t {
@@ -45,7 +49,7 @@ typedef struct linked_pcb_t {
 
     int exit_code;
 
-    uintptr_t cr3;
+    physptr_t cr3;
 
     uintptr_t opened_file_table;
 
@@ -85,7 +89,8 @@ void _build_user_stack_frame(uint64_t** stack_top, uint64_t entry,
     uint64_t user_rsp, uint16_t cs, uint16_t ss);
 
 linked_pcb* ktask_start(void* entry, char* name);
-linked_pcb* us_task_start(void* entry, char* name, physptr_t page_dir);
+linked_pcb* us_task_start(void* entry, char* name, physptr_t page_dir,
+                char** argv, char** envp);
 void enable_scheduler();
 void disable_scheduler();
 
@@ -95,4 +100,3 @@ void _yield();
 void _sched_next_process();
 void _log_all_processes();
 
-#endif // SCHEDULER_H

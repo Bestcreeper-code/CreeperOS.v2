@@ -33,6 +33,8 @@ typedef uintptr_t page_index;
 #define ADDR_TO_PAGE(addr) ((page_index)((addr) / PAGE_SIZE_4K))
 #define PAGE_TO_ADDR(pg)   ((uintptr_t)(pg) * PAGE_SIZE_4K)
 
+#define ROUND_TO_PAGE_UP(size)  ((page_index)((size) / PAGE_SIZE_4K)+1)
+
 extern uintptr_t kernel_pagedir_phys;
 extern volatile uintptr_t hhdm_offset;
 
@@ -69,3 +71,4 @@ uintptr_t kvma_alloc(size_t count);
 void kvma_free(uintptr_t base, size_t count);
 
 uintptr_t vmm_virt_to_phys(uintptr_t vaddr);
+uintptr_t page_dir_virt_to_phys(uint64_t* pml4, uintptr_t vaddr);
