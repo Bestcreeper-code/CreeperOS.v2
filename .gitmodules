@@ -7,3 +7,6 @@
 [submodule "kernel/src/uACPI"]
 	path = kernel/src/uACPI
 	url = https://github.com/uACPI/uACPI.git
+[submodule "userspace/libc/mlibc"]
+	path = userspace/libc/mlibc
+	url = https://github.com/managarm/mlibc.git

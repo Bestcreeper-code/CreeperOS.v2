@@ -2,11 +2,14 @@
 
 #include "arch/locks.h"
 #include "arch/vmm.h"
+#include "asm/asm.h"
 #include "debug/Logger.h"
+#include "debug/panic.h"
 #include "drivers/drivers.h"
 #include "memory/pmm.h"
 #include "memops.h"
 #include "scheduler/scheduler.h"
+#include <stdbool.h>
 
 
 
@@ -16,14 +19,20 @@ free_region_map_t *k_mmap = &region_map;
 
 static inline free_region_map_t *get_free_region_map() { return k_mmap; }
 
-static uint64_t heap_lock;
+static volatile uint64_t heap_lock;
+
 static inline void heap_lock_acquire() {
     int spins = 0;
     while (!try_acquire_lock(&heap_lock, 0)) {
-        if (++spins > 100) { _yield(); spins = 0; }
+        _yield();
+        // if (++spins > 1000) {if(_scheduler_current_process) Sys_Warning("%s trying to own the heap alloc\n",_scheduler_current_process->name);  spins = 0; }
     }
+    // if(_scheduler_current_process) Sys_Info("%s locked the heap alloc\n",_scheduler_current_process->name);
 }
-static inline void heap_lock_release() { release_lock(&heap_lock, 0); }
+static inline void heap_lock_release() {
+    release_lock(&heap_lock, 0);
+    // if(_scheduler_current_process) Sys_Info("%s unlocked the heap alloc\n",_scheduler_current_process->name);
+}
 
 static void force_free_nolock(uintptr_t address, size_t size);
 
@@ -319,7 +328,7 @@ void* kmalloc_impl(size_t size) {
         force_free_nolock(va, pages_needed * PMM_PAGE_SIZE);
         region = first_region_of_size_or_more(full_size);
     }
-
+    
     if (!region || region->base_addr <= 0xFFFF) {
         Sys_Error("kmalloc: still no usable region after expansion\n");
         
@@ -381,7 +390,7 @@ void kfree_impl(void* _Memory) {
     }
 
     if (!placed) {
-        Sys_Error("kfree: free_regions[] exhausted, leaking %zu bytes at %p\n", size, _Memory);
+        Sys_Warning("kfree: free_regions[] exhausted, leaking %zu bytes at %p\n", size, _Memory);
         heap_lock_release();
         return;
     }

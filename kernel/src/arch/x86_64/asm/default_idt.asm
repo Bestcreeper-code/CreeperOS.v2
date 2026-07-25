@@ -1,6 +1,8 @@
 [BITS 64]
 section .text
 
+global irq_dummy_common_wrap
+
 extern irq_dummy_common
 
 %macro ISR_STUB 1

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdbool.h>
 #pragma once
 #include <stdint.h>
 
@@ -39,6 +40,19 @@
 #define LAPIC_TIMER_MODE_PERIODIC 1
 
 
+#define ISO_POLARITY_MASK   0x3
+#define ISO_POLARITY_LOW    0x3  
+#define ISO_TRIGGER_MASK    0xC
+#define ISO_TRIGGER_LEVEL   0xC  
+
+typedef struct {
+    uint8_t  gsi;
+    bool     active_low;
+    bool     level_triggered;
+    bool     valid;
+} irq_override_t;
+
+static irq_override_t isa_irq_override[16];
 
 
 

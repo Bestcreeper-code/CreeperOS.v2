@@ -7,14 +7,19 @@
 #include "drivers/drivers.h"
 #include "Flanterm/src/flanterm_backends/fb.h"
 #include "Flanterm/src/flanterm.h"
-#include "executable/bin_exec/bin_exec.h"
+// #include "executable/bin_exec/bin_exec.h"
+#include "executable/elf/elf.h"
 #include "initrd_parse/initrd.h"
+#include "interrupts/apic.h"
+#include "interrupts/interrupts.h"
+#include "interrupts/ioapic.h"
 #include "memory/memory.h"
 #include "memory/pmm.h"
 #include "mm/vmm_arch.h"
 #include "requests.h"
 #include "syscalls/syscall.h"
 #include "timer/time.h"
+#include "vfs/devfs.h"
 #include "vfs/fs.h"
 #include "vfs/ramfile.h"
 #include "vfs/sysfs.h"
@@ -186,12 +191,13 @@ void kmain() {
     core_init();
     
     sysfs_init();
+    devfs_init();
 
     
     // fs_init();
     scheduler_init();
     k_ramfile_mkdir("/tmp", 0666);
-    
+#if !DISABLE_LOGGER_THREAD 
     log_queue_init();
     linked_pcb* klogger_pcb = ktask_start(_log_manager_thread, "klogger");
     if(!klogger_pcb){
@@ -201,6 +207,7 @@ void kmain() {
         Sys_Success("klogger started as pid:%d\n",klogger_pcb->pid);
         // for(;;);
     }
+#endif
     // for(int i = 0; i < 22; i++){
         //     hlt();
         // }
@@ -235,81 +242,45 @@ void kmain() {
     char* test_envp[] = {
         NULL
     };
-    bin_exec_raw("/initrd/test.bin", 0x100000,
-        test_argv, test_envp);
-    
-    Sys_Warning("Kernel reached halt????\n");
-    kill_ktask(_scheduler_current_process);
-    for(;;) sti();
+    // bin_exec_raw("/initrd/test.bin", test_argv, test_envp);
+    load_elf_from_vfs("/initrd/test.elf",test_argv,test_envp);
+    void force_kbd_ioapic_unmask(uintptr_t ioapic_base, uint8_t vector, uint8_t dest_lapic_id) ;
+    // Sys_Warning("Kernel reached halt????\n");
+    // _scheduler_current_process->state = PCB_STATE_DEAD;
+    for(;;) {
+        // sti();
+        // _current_eoi(33);
+        // force_kbd_ioapic_unmask((uintptr_t)(ioapic_base), 33, mp_request.response->bsp_lapic_id);
+    }
     hcf();
 }
 
+#define IOAPIC_REGSEL 0x00
+#define IOAPIC_REGWIN 0x10
 
-void dump_userspace_mappings(uint64_t* pml4) {
-    Sys_Debug("---- userspace mapping dump (PML4[0..255]) ----\n");
-    Sys_Debug("pml4 virt is %p\n",pml4);
+static inline uint32_t ioapic_read_reg(uintptr_t ioapic_base, uint8_t reg) {
+    *(volatile uint32_t*)(ioapic_base + IOAPIC_REGSEL) = reg;
+    return *(volatile uint32_t*)(ioapic_base + IOAPIC_REGWIN);
+}
 
-    for (int pml4_i = 0; pml4_i < 256; pml4_i++) {
-        uint64_t pml4_e = pml4[pml4_i];
-        if (!(pml4_e & PTE_PRESENT)) continue;
+static inline void ioapic_write_reg(uintptr_t ioapic_base, uint8_t reg, uint32_t val) {
+    *(volatile uint32_t*)(ioapic_base + IOAPIC_REGSEL) = reg;
+    *(volatile uint32_t*)(ioapic_base + IOAPIC_REGWIN) = val;
+}
 
-        uint64_t* pdpt = (uint64_t*)((pml4_e & PTE_ADDR_MASK) + hhdm_offset);
 
-        for (int pdpt_i = 0; pdpt_i < 512; pdpt_i++) {
-            uint64_t pdpt_e = pdpt[pdpt_i];
-            if (!(pdpt_e & PTE_PRESENT)) continue;
+void force_kbd_ioapic_unmask(uintptr_t ioapic_base, uint8_t vector, uint8_t dest_lapic_id) {
+    uint8_t low_reg  = 0x10 + 2 * 1;      // GSI 1 low dword
+    uint8_t high_reg = 0x10 + 2 * 1 + 1;  // GSI 1 high dword
 
-            uintptr_t va_pdpt = ((uintptr_t)pml4_i << 39) | ((uintptr_t)pdpt_i << 30);
+    uint32_t low  = ioapic_read_reg(ioapic_base, low_reg);
 
-            if (pdpt_e & PTE_HUGE) {
-                Sys_Debug("1G  VA=%p -> PA=%p  flags: %s %s %s %s\n",
-                    (void*)va_pdpt,
-                    (void*)(pdpt_e & PTE_ADDR_MASK),
-                    (pdpt_e & PTE_WRITABLE) ? "W" : "-",
-                    (pdpt_e & PTE_USER)     ? "U" : "-",
-                    (pdpt_e & PTE_NX)       ? "NX" : "X",
-                    (pdpt_e & PTE_LOCAL_OWNED)  ? "O" : "NO");
-                continue;
-            }
+    // brute-force stomp: vector, edge-triggered, active-high, physical dest, unmasked
+    low &= ~(1 << 16); // clear mask bit unconditionally
+    low = (low & 0xFFFFFF00) | vector;
 
-            uint64_t* pd = (uint64_t*)((pdpt_e & PTE_ADDR_MASK) + hhdm_offset);
+    uint32_t high = (uint32_t)dest_lapic_id << 24;
 
-            for (int pd_i = 0; pd_i < 512; pd_i++) {
-                uint64_t pd_e = pd[pd_i];
-                if (!(pd_e & PTE_PRESENT)) continue;
-
-                uintptr_t va_pd = va_pdpt | ((uintptr_t)pd_i << 21);
-
-                if (pd_e & PTE_HUGE) {
-                    Sys_Debug("2M  VA=%p -> PA=%p  flags: %s %s %s %s\n",
-                        (void*)va_pd,
-                        (void*)(pd_e & PTE_ADDR_MASK),
-                        (pd_e & PTE_WRITABLE) ? "W" : "-",
-                        (pd_e & PTE_USER)     ? "U" : "-",
-                        (pd_e & PTE_NX)       ? "NX" : "X",
-                        (pd_e & PTE_LOCAL_OWNED)  ? "O" : "NO");
-                    continue;
-                }
-
-                uint64_t* pt = (uint64_t*)((pd_e & PTE_ADDR_MASK) + hhdm_offset);
-
-                for (int pt_i = 0; pt_i < 512; pt_i++) {
-                    uint64_t pt_e = pt[pt_i];
-                    if (!(pt_e & PTE_PRESENT)) continue;
-
-                    uintptr_t va = va_pd | ((uintptr_t)pt_i << 12);
-
-                    Sys_Debug("4K  VA=%p -> PA=%p  flags: %s %s %s %s\n",
-                        (void*)va,
-                        (void*)(pt_e & PTE_ADDR_MASK),
-                        (pt_e & PTE_WRITABLE) ? "W" : "-",
-                        (pt_e & PTE_USER)     ? "U" : "-",
-                        (pt_e & PTE_NX)       ? "NX" : "X",
-                        (pt_e & PTE_LOCAL_OWNED)  ? "O" : "NO");
-                }
-            }
-        }
-    }
-
-    Sys_Debug("---- end mapping dump ----\n");
+    ioapic_write_reg(ioapic_base, high_reg, high);
+    ioapic_write_reg(ioapic_base, low_reg, low);
 }

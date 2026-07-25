@@ -35,10 +35,16 @@ static uint64_t vmm_lock;
 static inline void vmm_lock_acquire() {
     int spins = 0;
     while (!try_acquire_lock(&vmm_lock, 0)) {
-        if (++spins > 100) { _yield(); spins = 0; }
+        _yield();
+        // if (++spins > 1000) { if(_scheduler_current_process) Sys_Warning("%s trying to own the vmm alloc\n",_scheduler_current_process->name); spins = 0; }
     }
+
+    // if(_scheduler_current_process) Sys_Info("%s locked the vmm alloc\n",_scheduler_current_process->name);
 }
-static inline void vmm_lock_release() { release_lock(&vmm_lock, 0); }
+static inline void vmm_lock_release() { 
+    release_lock(&vmm_lock, 0); 
+    // if(_scheduler_current_process) Sys_Info("%s unlocked the vmm alloc\n",_scheduler_current_process->name);
+}
 
 static uint64_t kvma_lock;
 static inline void kvma_lock_acquire() {
@@ -47,7 +53,9 @@ static inline void kvma_lock_acquire() {
         if (++spins > 100) { _yield(); spins = 0; }
     }
 }
-static inline void kvma_lock_release() { release_lock(&kvma_lock, 0); }
+static inline void kvma_lock_release() { 
+    release_lock(&kvma_lock, 0); 
+}
 
 
 static inline uint64_t* phys_to_boot_virt(uintptr_t phys) {

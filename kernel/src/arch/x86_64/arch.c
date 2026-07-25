@@ -1,5 +1,6 @@
 #include "arch/arch.h"
 #include "arch/x86_64/interrupts/apic.h"
+#include "cpu/x87/fpu.h"
 #include "debug/Logger.h"
 #include "debug/panic.h"
 #include "arch/vmm.h"
@@ -18,12 +19,13 @@ GCC_ATTR((noreturn))
 void arch_init(){
     Sys_log("Entering arch init\n");
     register_cpu_features();
-
     
     init_gdt();
     idt_init();
     
     register_cpu_exceptions();
+    
+    fpu_init();
     
     //mem
     pmm_init();

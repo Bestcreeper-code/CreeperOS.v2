@@ -101,7 +101,7 @@ const unsigned char keymaps[KB_LAY_COUNT][MOD_COUNT][NUM_SCANCODES] = {
 
 bool extended = false;
 
-unsigned char GetInputCharNonBlocking(void) {
+unsigned char get_input_char_non_blocking(void) {
     uint8_t status;
     __asm__ __volatile__("inb $0x64, %0" : "=a"(status));
     if (!(status & 0x01)) {
@@ -208,19 +208,18 @@ unsigned char GetInputCharNonBlocking(void) {
 
 GCC_ATTR((interrupt))
 void ps2_keyboard_handler(void* frame) {
-    unsigned char ch = GetInputCharNonBlocking();
+    unsigned char ch = get_input_char_non_blocking();
     if (ch != 0) {
         uint16_t next_tail = (buf_tail + 1) % INPUT_CHAR_BUFFER_SIZE;
         if (next_tail != buf_head) {
             input_char_buffer[buf_tail] = ch;
             buf_tail = next_tail;
         }
-        Sys_log_NoPos("%c",ch);
+        // Sys_log_NoPos("%c",ch);
     }
 
     if(ch=='l') _log_all_processes();
     if(ch=='t') fs_tree(root_dentry, 0);
-    
     _current_eoi((uint8_t)HARDCODED_PS2_KBD_INTERRUPT_VECTOR_INDEX);
 }
 
@@ -236,7 +235,7 @@ int ps2_kbd_read(struct input_device *dev, void *buf, size_t count, loff_t offse
     while (bytes_read < count) {
         unsigned char ch = 0;
         while (ch == 0) {
-            __asm__ __volatile__(" hlt");
+            // __asm__ __volatile__(" hlt");
             if (buf_head != buf_tail) {
                 ch = input_char_buffer[buf_head];
                 buf_head = (buf_head + 1) % INPUT_CHAR_BUFFER_SIZE;
@@ -260,31 +259,24 @@ int ps2_kbd_init() {
     idt_set_allocated(HARDCODED_PS2_KBD_INTERRUPT_VECTOR_INDEX);
     setup_interrupt_vector(HARDCODED_PS2_KBD_INTERRUPT_VECTOR_INDEX, ps2_keyboard_handler, IRQ_FLAG_INTERRUPT);
 
-    
-    outb(0x64, 0xAE);//enable kbd port
-    
-    
-    outb(0x60, 0xF4);//enable scanning
-    
-        
+    outb(0x64, 0xAE);
+    outb(0x60, 0xF4);
+
     while (!(inb(0x64) & 0x01));
     uint8_t ack = inb(0x60);
-    
     Sys_Info("ACK: %02x\n", ack);
-    uint8_t master_mask = inb(0x21);
-    master_mask &= ~(1 << 1);
-    outb(0x21, master_mask);
-    
-    
-    if(register_input_device(
+
+    struct input_device* kbd_dev = register_input_device(
         "PS/2 Keyboard",
         &ps2_kbd_ops,
         NULL
-    ) == NULL ){
+    );
+
+    if (kbd_dev == NULL) {
         Sys_Error("couldn't register ps2 in input registery\n");
         return -1;
     }
-    
+
     return 0;
 }
 REGISTER_DRIVER_DEV(ps_2_kbd, ps2_kbd_init);

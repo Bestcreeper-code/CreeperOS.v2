@@ -92,6 +92,10 @@ static inline void hlt(){
     asm volatile("hlt");
 } 
 
+static inline void brkpt(){
+    asm volatile("int3");
+}
+
 typedef struct {
     size_t rax, rbx, rcx, rdx;
     size_t rsi, rdi, rbp, rsp;
@@ -107,11 +111,15 @@ typedef struct {
 
 
 typedef struct {
-    uintptr_t top,bottom;
+    uintptr_t top,bottom;// "top of the stack" and not highest adress
     size_t size;
 } stack_t;
 
-typedef stack_t heap_t;
+typedef struct {
+    uintptr_t higher,lower;
+    size_t size;
+} heap_t;
+
 
 inline void capture_cpu_registers(cpu_registers_t* regs) {
     asm volatile(
@@ -167,6 +175,9 @@ inline void capture_cpu_registers(cpu_registers_t* regs) {
     );
 }
 
+#define MSR_FS_BASE 0xC0000100
+#define MSR_GS_BASE 0xC0000101
+
 inline static uint64_t rdmsr(uint32_t msr) {
     uint32_t low, high;
     __asm__ volatile ("rdmsr" : "=a"(low), "=d"(high) : "c"(msr));
@@ -179,6 +190,14 @@ inline static void wrmsr(uint32_t msr, uint64_t value) {
     __asm__ volatile ("wrmsr" : : "c"(msr), "a"(low), "d"(high));
 }
 
+
+static inline void fxsave_state(uint8_t *area) {
+    __asm__ volatile ("fxsave (%0)" :: "r"(area) : "memory");
+}
+
+static inline void fxrstor_state(uint8_t *area) {
+    __asm__ volatile ("fxrstor (%0)" :: "r"(area) : "memory");
+}
 
 #else
 #error unsupported arch

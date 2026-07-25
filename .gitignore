@@ -18,3 +18,6 @@ limine-binary
 *.cache
 *.o
 *.elf
+*.ansi
+_initrd/usr/include
+_initrd/usr/lib

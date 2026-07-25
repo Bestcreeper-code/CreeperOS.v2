@@ -17,8 +17,7 @@ align 8
 _syscall_user_rsp_scratch: resq 1
 
 section .text
-_syscall_entry:
-
+_syscall_entry: ;enters with interrupts disabled
     mov [rel _syscall_user_rsp_scratch], rsp ; stash user rsp
     mov rsp, [rel _tss + TSS_RSP0_OFFSET] ; this process's kernel stack
 
@@ -30,7 +29,7 @@ _syscall_entry:
     push rcx ; rip
 
     PUSH_ALL
-
+sti
     mov rbx, rdi       ; arg1
     mov rbp, rsi       ; arg2
     mov r12, rdx       ; arg3
@@ -48,8 +47,8 @@ _syscall_entry:
     mov rax, rsp        ; stash rsp
 
     sub rsp, 8
-    push r15                ; arg6
     push rax                ; rsp(arg7)
+    push r15                ; arg6
 
     call syscall_handler
 

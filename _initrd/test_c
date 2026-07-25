@@ -1,0 +1,474 @@
+#include <stdint.h>
+
+#define SYS_READ        0
+#define SYS_WRITE       1
+#define SYS_OPEN        2
+#define SYS_CLOSE       3
+#define SYS_LSEEK       8
+#define SYS_BRK         12
+#define SYS_SCHED_YIELD 24
+#define SYS_GETPID      39
+#define SYS_FORK        57
+#define SYS_EXIT        60
+#define SYS_GETCWD      79
+#define SYS_MKDIR       83
+#define SYS_RMDIR       84
+#define SYS_CREAT       85
+#define SYS_UNLINK      87
+
+static long syscall1(long n, long a1)
+{
+    long ret;
+    asm volatile("syscall" : "=a"(ret) : "a"(n), "D"(a1) : "rcx", "r11", "memory");
+    return ret;
+}
+static long syscall2(long n, long a1, long a2)
+{
+    long ret;
+    asm volatile("syscall" : "=a"(ret) : "a"(n), "D"(a1), "S"(a2) : "rcx", "r11", "memory");
+    return ret;
+}
+static long syscall3(long n, long a1, long a2, long a3)
+{
+    long ret;
+    asm volatile("syscall" : "=a"(ret) : "a"(n), "D"(a1), "S"(a2), "d"(a3) : "rcx", "r11", "memory");
+    return ret;
+}
+static long syscall0(long n)
+{
+    long ret;
+    asm volatile("syscall" : "=a"(ret) : "a"(n) : "rcx", "r11", "memory");
+    return ret;
+}
+
+static char dir[]     = "/tmp/test";
+static char file[]    = "/tmp/test/hello.txt";
+static char msg[]     = "hello from C userspace syscall test\n";
+static char lseekmsg[]= "0123456789ABCDEF";
+
+static char sysfs_name_path[] = "/sys/class/input/input0/name";
+static char sysfs_id_path[]   = "/sys/class/input/input0/id";
+static char devfs_kbd_path[]  = "/dev/input/input0";
+
+/* ---- tiny freestanding helpers (no libc available) ---- */
+
+static int u_strlen(const char* s)
+{
+    int n = 0;
+    while (s[n]) n++;
+    return n;
+}
+
+static void u_write_str(const char* s)
+{
+    syscall3(SYS_WRITE, 1, (long)s, u_strlen(s));
+}
+
+static void u_write_hex(uint64_t v)
+{
+    char buf[19];
+    const char* hexch = "0123456789abcdef";
+    buf[0] = '0';
+    buf[1] = 'x';
+    for (int i = 0; i < 16; i++)
+        buf[2 + i] = hexch[(v >> ((15 - i) * 4)) & 0xF];
+    buf[18] = '\0';
+    u_write_str(buf);
+}
+
+static void u_write_dec(uint64_t v)
+{
+    char buf[21];
+    int i = 20;
+    buf[i--] = '\0';
+    if (v == 0) {
+        buf[i--] = '0';
+    } else {
+        while (v > 0) {
+            buf[i--] = '0' + (v % 10);
+            v /= 10;
+        }
+    }
+    u_write_str(&buf[i + 1]);
+}
+
+/* handles negative return values (errno-style: -errno) */
+static void u_write_ret(long v)
+{
+    if (v < 0) {
+        u_write_str("-");
+        u_write_dec((uint64_t)(-v));
+    } else {
+        u_write_dec((uint64_t)v);
+    }
+}
+
+/* logs "<label>: <ret>\n" for any syscall return */
+static void log_ret(const char* label, long ret)
+{
+    u_write_str("[log] ");
+    u_write_str(label);
+    u_write_str(" -> ");
+    u_write_ret(ret);
+    u_write_str("\n");
+}
+
+/* ---- argc/argv/envp test ---- */
+
+static void test_args(int argc, char** argv, char** envp)
+{
+    u_write_str("=== TEST: argv/envp ===\n");
+
+    u_write_str("argc = ");
+    u_write_dec((uint64_t)argc);
+    u_write_str("\n");
+
+    u_write_str("argv @ ");
+    u_write_hex((uint64_t)argv);
+    u_write_str("\n");
+
+    for (int i = 0; i < argc; i++) {
+        u_write_str("  argv[");
+        u_write_dec((uint64_t)i);
+        u_write_str("] = ");
+        u_write_str(argv[i]);
+        u_write_str("\n");
+    }
+    u_write_str("  argv[");
+    u_write_dec((uint64_t)argc);
+    u_write_str("] = (nil)\n");
+
+    u_write_str("envp @ ");
+    u_write_hex((uint64_t)envp);
+    u_write_str("\n");
+
+    int envc = 0;
+    if (envp) {
+        while (envp[envc]) {
+            u_write_str("  envp[");
+            u_write_dec((uint64_t)envc);
+            u_write_str("] = ");
+            u_write_str(envp[envc]);
+            u_write_str("\n");
+            envc++;
+        }
+    }
+    u_write_str("  envp[");
+    u_write_dec((uint64_t)envc);
+    u_write_str("] = (nil)\n");
+
+    u_write_str("=== END argv/envp ===\n\n");
+}
+
+/* ---- getpid test ---- */
+
+static void test_getpid(void)
+{
+    u_write_str("=== TEST: getpid ===\n");
+    long pid = syscall0(SYS_GETPID);
+    log_ret("getpid", pid);
+    u_write_str("=== END getpid ===\n\n");
+}
+
+/* ---- mkdir/creat/open/write/close test ---- */
+
+static void test_file_write(void)
+{
+    u_write_str("=== TEST: mkdir/creat/open/write/close ===\n");
+
+    long ret = syscall2(SYS_MKDIR, (long)dir, 0755);
+    log_ret("mkdir /tmp/ctt", ret);
+
+    ret = syscall2(SYS_CREAT, (long)file, 0644);
+    log_ret("creat hello.txt", ret);
+
+    long fd = syscall3(SYS_OPEN, (long)file, 2 /* O_RDWR */, 0);
+    log_ret("open hello.txt (O_RDWR)", fd);
+
+    if (fd >= 0) {
+        long wret = syscall3(SYS_WRITE, fd, (long)msg, sizeof(msg) - 1);
+        log_ret("write hello.txt", wret);
+
+        long cret = syscall1(SYS_CLOSE, fd);
+        log_ret("close hello.txt", cret);
+    } else {
+        u_write_str("  [skip] write/close: open failed\n");
+    }
+
+    u_write_str("=== END mkdir/creat/open/write/close ===\n\n");
+}
+
+/* ---- read test ---- */
+
+static void test_read(void)
+{
+    u_write_str("=== TEST: read ===\n");
+
+    long fd = syscall3(SYS_OPEN, (long)file, 2 /* O_RDWR */, 0);
+    log_ret("open hello.txt for read", fd);
+
+    if (fd >= 0) {
+        char buf[64];
+        for (int i = 0; i < 64; i++) buf[i] = 0;
+
+        long rret = syscall3(SYS_READ, fd, (long)buf, sizeof(buf) - 1);
+        log_ret("read hello.txt", rret);
+
+        if (rret > 0) {
+            u_write_str("  data: ");
+            u_write_str(buf);
+        }
+
+        long cret = syscall1(SYS_CLOSE, fd);
+        log_ret("close hello.txt", cret);
+    } else {
+        u_write_str("  [skip] read: open failed\n");
+    }
+
+    u_write_str("=== END read ===\n\n");
+}
+
+/* ---- lseek test ---- */
+
+static void test_lseek(void)
+{
+    u_write_str("=== TEST: lseek ===\n");
+
+    long fd = syscall3(SYS_OPEN, (long)file, 2 /* O_RDWR */, 0);
+    log_ret("open hello.txt for lseek", fd);
+
+    if (fd >= 0) {
+        long wret = syscall3(SYS_WRITE, fd, (long)lseekmsg, sizeof(lseekmsg) - 1);
+        log_ret("write marker string", wret);
+
+        /* SEEK_SET = 0: rewind to start */
+        long sret = syscall3(SYS_LSEEK, fd, 0, 0);
+        log_ret("lseek SEEK_SET 0", sret);
+
+        char buf[8] = {0};
+        long rret = syscall3(SYS_READ, fd, (long)buf, 4);
+        log_ret("read after seek", rret);
+        u_write_str("  first 4 bytes: ");
+        u_write_str(buf);
+        u_write_str("\n");
+
+        long cret = syscall1(SYS_CLOSE, fd);
+        log_ret("close after lseek test", cret);
+    } else {
+        u_write_str("  [skip] lseek: open failed\n");
+    }
+
+    u_write_str("=== END lseek ===\n\n");
+}
+
+/* ---- brk test ---- */
+
+static void test_brk(void)
+{
+    u_write_str("=== TEST: brk ===\n");
+
+    /* brk(0) is the usual "query current break" convention */
+    long cur = syscall1(SYS_BRK, 0);
+    log_ret("brk(0) query current", cur);
+
+    long grown = syscall1(SYS_BRK, cur + 0x1000);
+    log_ret("brk(cur+0x1000) grow heap", grown);
+
+    if (grown > 0) {
+        volatile char* p = (volatile char*)cur;
+        *p = 0x42;
+        u_write_str("  wrote to new heap byte, value=");
+        u_write_dec((uint64_t)(*p));
+        u_write_str("\n");
+    }
+
+    u_write_str("=== END brk ===\n\n");
+}
+
+/* ---- getcwd test ---- */
+
+static void test_getcwd(void)
+{
+    u_write_str("=== TEST: getcwd ===\n");
+
+    char buf[128];
+    for (int i = 0; i < 128; i++) buf[i] = 0;
+
+    long ret = syscall2(SYS_GETCWD, (long)buf, sizeof(buf));
+    log_ret("getcwd", ret);
+
+    if (ret >= 0) {
+        u_write_str("  cwd: ");
+        u_write_str(buf);
+        u_write_str("\n");
+    }
+
+    u_write_str("=== END getcwd ===\n\n");
+}
+
+/* ---- sched_yield test ---- */
+
+static void test_sched_yield(void)
+{
+    u_write_str("=== TEST: sched_yield ===\n");
+    long ret = syscall0(SYS_SCHED_YIELD);
+    log_ret("sched_yield", ret);
+    u_write_str("=== END sched_yield ===\n\n");
+}
+
+/* ---- fork test ---- */
+
+static void test_fork(void)
+{
+    u_write_str("=== TEST: fork ===\n");
+
+    long pid = syscall0(SYS_FORK);
+    log_ret("fork", pid);
+
+    if (pid == 0) {
+        u_write_str("  [child] hello from child, pid = ");
+        long mypid = syscall0(SYS_GETPID);
+        u_write_dec((uint64_t)mypid);
+        u_write_str("\n");
+        /* child exits on its own so it doesn't fall through
+        into the parent's later cleanup/exit path twice */
+        syscall1(SYS_EXIT, 0);
+        while (1);
+    } else if (pid > 0) {
+        u_write_str("  [parent] forked child pid = ");
+        u_write_dec((uint64_t)pid);
+        u_write_str("\n");
+    } else {
+        u_write_str("  [parent] fork failed\n");
+    }
+
+    u_write_str("=== END fork ===\n\n");
+}
+
+/* ---- sysfs input test: read /sys/class/input/input0/{name,id} ---- */
+
+static void test_sysfs_input(void)
+{
+    u_write_str("=== TEST: sysfs input (name/id) ===\n");
+
+    long fd = syscall3(SYS_OPEN, (long)sysfs_name_path, 0 /* O_RDONLY */, 0);
+    log_ret("open /sys/class/input/input0/name", fd);
+
+    if (fd >= 0) {
+        char buf[64] = {0};
+        long rret = syscall3(SYS_READ, fd, (long)buf, sizeof(buf) - 1);
+        log_ret("read name", rret);
+        if (rret > 0) {
+            u_write_str("  name: ");
+            u_write_str(buf);
+        }
+        long cret = syscall1(SYS_CLOSE, fd);
+        log_ret("close name", cret);
+    } else {
+        u_write_str("  [skip] name: open failed\n");
+    }
+
+    fd = syscall3(SYS_OPEN, (long)sysfs_id_path, 0 /* O_RDONLY */, 0);
+    log_ret("open /sys/class/input/input0/id", fd);
+
+    if (fd >= 0) {
+        char buf[32] = {0};
+        long rret = syscall3(SYS_READ, fd, (long)buf, sizeof(buf) - 1);
+        log_ret("read id", rret);
+        if (rret > 0) {
+            u_write_str("  id: ");
+            u_write_str(buf);
+        }
+        long cret = syscall1(SYS_CLOSE, fd);
+        log_ret("close id", cret);
+    } else {
+        u_write_str("  [skip] id: open failed\n");
+    }
+
+    u_write_str("=== END sysfs input ===\n\n");
+}
+
+/* ---- devfs input test: blocking read from /dev/input/input0 ----
+ *
+ * ps2_kbd_read() blocks on hlt until a key comes through the ring
+ * buffer, so this will sit here waiting for keypresses -- press a
+ * few keys on the keyboard to see this test complete.
+ */
+
+static void test_devfs_input(void)
+{
+    u_write_str("=== TEST: devfs input (blocking read) ===\n");
+
+    long fd = syscall3(SYS_OPEN, (long)devfs_kbd_path, 0 /* O_RDONLY */, 0);
+    log_ret("open /dev/input/input0", fd);
+
+    if (fd >= 0) {
+        u_write_str("  press a few keys...\n");
+
+        char buf[8] = {0};
+        long rret = syscall3(SYS_READ, fd, (long)buf, sizeof(buf) - 1);
+        log_ret("read /dev/input/input0", rret);
+
+        if (rret > 0) {
+            u_write_str("  got: ");
+            u_write_str(buf);
+            u_write_str("\n");
+        }
+
+        long cret = syscall1(SYS_CLOSE, fd);
+        log_ret("close /dev/input/input0", cret);
+    } else {
+        u_write_str("  [skip] devfs input: open failed\n");
+    }
+
+    u_write_str("=== END devfs input ===\n\n");
+}
+
+/* ---- unlink/rmdir cleanup test ---- */
+
+static void test_cleanup(void)
+{
+    u_write_str("=== TEST: unlink/rmdir ===\n");
+
+    long rret = syscall1(SYS_RMDIR, (long)dir);
+    log_ret("rmdir /tmp/ctest", rret);
+
+    long uret = syscall1(SYS_UNLINK, (long)file);
+    log_ret("unlink hello.txt", uret);
+
+    u_write_str("=== END unlink/rmdir ===\n\n");
+}
+
+void main(int argc, char** argv, char** envp)
+{
+    test_args(argc, argv, envp);
+    test_getpid();
+
+    test_file_write();
+    test_read();
+    test_lseek();
+    test_brk();
+    test_getcwd();
+    test_sched_yield();
+    //test_fork();
+    test_sysfs_input();
+    test_devfs_input();
+
+    test_cleanup();
+
+//for(;;);
+    u_write_str("=== ALL TESTS DONE ===\n");
+
+    syscall1(SYS_EXIT, 0);
+    while (1);
+}
+
+/*
+gcc -x c -m64 -ffreestanding -fno-stack-protector -fno-pie -no-pie -nostdlib -c test_c -o test.o
+
+nasm -f elf64 start.s -o start.o
+
+ld -m elf_x86_64 -T link.ld start.o test.o -o test.elf
+
+objcopy -O binary test.elf test.bin
+*/

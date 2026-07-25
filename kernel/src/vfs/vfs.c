@@ -8,6 +8,7 @@
 #include "scheduler/scheduler.h"
 #include "string/string.h"
 #include "memory/memory.h"
+#include "memops.h"
 // #include "time.h"
 #include "defines/types.h"
 #include "defines/err_codes.h"
@@ -71,6 +72,17 @@ struct dentry *vfs_lookup(struct inode* dir, struct dentry* file, unsigned int f
 }
 
 int vfs_create(struct inode *dir, struct dentry *dentry, umode_t mode, bool excl) {
+    struct hlist_node *pos;
+
+    
+    hlist_for_each(pos, &dir->i_dentry->d_children) {
+        struct dentry *child = container_of(pos, struct dentry, d_sib);
+
+        if (strcmp(child->name, dentry->name) == 0) {
+            return -E_EXIST;
+        }
+    }
+
     struct inode *new_inode = kmalloc(sizeof(struct inode));
     RET_IF(!new_inode, -E_NOMEM);
 
@@ -82,19 +94,13 @@ int vfs_create(struct inode *dir, struct dentry *dentry, umode_t mode, bool excl
     new_inode->i_count   = 0;
     new_inode->i_private = NULL;
 
-    // rtc_time_t *time = kmalloc(sizeof(rtc_time_t));
-    // rtc_read_time(time);
-    // new_inode->i_ctime = rtc_to_unix_timestamp(time);
-    // new_inode->i_mtime = new_inode->i_ctime;
-    
     INIT_HLIST_HEAD(&dentry->d_children);
     INIT_HLIST_NODE(&dentry->d_sib);
 
     dentry->inode = new_inode;
-    
-    
+
     hlist_add_head(&dentry->d_sib, &dir->i_dentry->d_children);
-    
+
     return 0;
 }
 
@@ -143,4 +149,84 @@ int vfs_unlink(struct inode* dir, struct dentry* dentry) {
 
 int vfs_inv_func(){
     RET_ERR(E_INVAL);
+}
+
+
+#define DIRENT64_ALIGN(x) (((x) + 7) & ~(size_t)7)
+
+ssize_t vfs_getdents64(struct file* file, char* buf, size_t count)
+{
+    if (!file || !file->f_inode || !buf)
+        return -E_INVAL;
+
+    if (!S_ISDIR(file->f_inode->i_mode))
+        return -E_NOTDIR;
+
+    struct dentry* dir = file->f_inode->i_dentry;
+    if (!dir)
+        return -E_INVAL;
+
+    loff_t target = file->f_pos;
+    loff_t idx = 0;
+    size_t bpos = 0;
+
+    // fake . and ..
+    struct dentry* virt[2] = { dir, dir->parent ? dir->parent : dir };
+
+    for (int i = 0; i < 2; i++, idx++) {
+        if (idx < target)
+            continue;
+
+        const char* name    = (i == 0) ? "." : "..";
+        size_t namelen      = (i == 0) ? 1 : 2;
+        size_t reclen       = DIRENT64_ALIGN(offsetof(struct linux_dirent64, d_name) + namelen + 1);
+
+        if (bpos + reclen > count) {
+            if (bpos == 0)
+                return -E_INVAL; // buffer too small 
+            file->f_pos = idx;
+            return (ssize_t)bpos;
+        }
+
+        struct linux_dirent64* d = (struct linux_dirent64*)(buf + bpos);
+        d->d_ino    = (uint64_t)(uintptr_t)virt[i]->inode;
+        d->d_off    = idx + 1;
+        d->d_reclen = (uint16_t)reclen;
+        d->d_type   = DT_DIR;
+        memcpy(d->d_name, name, namelen + 1);
+
+        bpos += reclen;
+    }
+
+    
+    struct hlist_node* pos;
+    hlist_for_each(pos, &dir->d_children) {
+        if (idx < target) {
+            idx++;
+            continue;
+        }
+
+        struct dentry* child = container_of(pos, struct dentry, d_sib);
+        size_t namelen = strlen(child->name);
+        size_t reclen  = DIRENT64_ALIGN(offsetof(struct linux_dirent64, d_name) + namelen + 1);
+
+        if (bpos + reclen > count) {
+            if (bpos == 0)
+                return -E_INVAL;
+            break;
+        }
+
+        struct linux_dirent64* d = (struct linux_dirent64*)(buf + bpos);
+        d->d_ino    = (uint64_t)(uintptr_t)child->inode;
+        d->d_off    = idx + 1;
+        d->d_reclen = (uint16_t)reclen;
+        d->d_type   = (child->inode && S_ISDIR(child->inode->i_mode)) ? DT_DIR : DT_REG;
+        memcpy(d->d_name, child->name, namelen + 1);
+
+        bpos += reclen;
+        idx++;
+    }
+
+    file->f_pos = idx;
+    return (ssize_t)bpos;
 }

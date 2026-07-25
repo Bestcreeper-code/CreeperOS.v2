@@ -1,10 +1,9 @@
-#ifndef SYSCALLS_H
-#define SYSCALLS_H
+#pragma once
 
 #include "asm/asm.h"
 #include "defines/compiler_defs.h"
 #include "defines/types.h"
-
+#include "scheduler/scheduler.h"
 
 
 
@@ -56,6 +55,31 @@ uintptr_t sys_brk(
     size_t brk
 );
 
+pid_t sys_getpid();
+
+pid_t sys_fork(register_t rsp);
+
+
+
+#define EXEC_ARGV_MAX   64
+#define EXEC_ARG_MAXLEN 256
+int sys_execve(
+    const __user char* filename,
+    const __user char* argv[],
+    const __user char* envp[],
+    register_t rsp
+);
+
+void sys_exit(
+    int code,
+    register_t rsp
+);
+
+char* sys_getcwd(
+    __user char* buf,
+    unsigned long size
+);
+
 int sys_mkdir(
     const __user char* path,
     int mode
@@ -74,11 +98,53 @@ int sys_unlink(
     const __user char* path
 );
 
-void sys_exit(
-    int code,
-    register_t rsp
+
+int sys_access(
+    const __user char* path,
+    int mode
 );
 
+int sys_dup2(
+    int oldfd,
+    int newfd
+);
 
+int sys_dup(
+    int oldfd
+);
 
-#endif // SYSCALLS_H
+int sys_chdir(
+    const __user char* path
+);
+
+#define ARCH_PRCTL_SET_FS 0x1002
+long sys_arch_prctl(
+    int code,
+    unsigned long* addr
+);
+
+ssize_t sys_getdents64(
+    unsigned int fd,
+    __user void* dirp,
+    size_t count
+);
+
+int sys_openat(
+    int dfd,
+    const __user char* filename,
+    int flags,
+    int mode
+);
+
+int sys_mkdirat(
+    int dfd,
+    const __user char* path,
+    int mode
+);
+
+int sys_unlinkat(
+    int dfd,
+    const __user char* pathname,
+    int flag
+);
+

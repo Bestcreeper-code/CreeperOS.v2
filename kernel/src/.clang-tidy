@@ -40,7 +40,7 @@ CheckOptions:
   - key: readability-identifier-naming.MacroDefinitionCase
     value: UPPER_CASE
   - key: readability-identifier-naming.MacroDefinitionIgnoredRegexp
-    value: "^(kmalloc|kfree|krealloc|_[A-Z0-9_]+)$"
+    value: "^(struct_kmalloc_align|struct_kmalloc|kmalloc|kfree|krealloc|_[A-Z0-9_]+)$"
 
   - key: IncludeCategories
     value: |

@@ -36,6 +36,6 @@ typedef enum {
 } KeyModifier;
 
 
-unsigned char GetInputCharNonBlocking();
+unsigned char get_input_char_non_blocking();
 unsigned char getc();
 unsigned char getc_nb();

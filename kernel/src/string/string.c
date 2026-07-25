@@ -104,7 +104,9 @@ char* strtok_r(char* str, const char* delim, char** saveptr) {
 
 char *strdup(const char *s){
     size_t len = strlen(s);
+    // Sys_Warning("\n\nfrmt, ...\n\n");
     char* pter = (char*)kmalloc_impl(len+1);
+    // Sys_Warning("\n\nfrmt, ...\n\n");
     if(!pter)return NULL;
     memcpy(pter,s,len+1);
     return pter;

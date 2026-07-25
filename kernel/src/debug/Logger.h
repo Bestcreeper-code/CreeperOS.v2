@@ -18,7 +18,7 @@
 
 #define Sys_log_NoPos(frmt , ...) sys_serial_logf(frmt, NULL, NULL, 0, ##__VA_ARGS__)
 
-#if !POS_DEBUG_LOGS
+#if POS_DEBUG_LOGS
 
 #define Sys_log(frmt, ...) Sys_log_Pos(frmt, ##__VA_ARGS__)
 
@@ -33,7 +33,7 @@
 
 #define Sys_log(frmt, ...) Sys_log_NoPos(frmt, ##__VA_ARGS__)
 
-#define Sys_Debug(frmt, ...)   Sys_log_NoPos("[\e[90mDEBUG\e[0m] "   frmt, ##__VA_ARGS__)
+#define Sys_Debug(frmt, ...)   Sys_log_NoPos("[\e[90mDEBUG\e[0m] \e[90m"   frmt ESC_RESET, ##__VA_ARGS__)
 #define Sys_Info(frmt, ...)    Sys_log_NoPos("[\e[36mINFO\e[0m] "    frmt, ##__VA_ARGS__)
 #define Sys_Success(frmt, ...) Sys_log_NoPos("[\e[32mOK\e[0m] "      frmt, ##__VA_ARGS__)
 #define Sys_Warning(frmt, ...) Sys_log_NoPos("[\e[93mWARNING\e[0m] " frmt, ##__VA_ARGS__)
@@ -45,7 +45,7 @@
 
 
 
-#define Sys_Breakpoint() Sys_log("Breakpoint hit at %s:%d\n", __FILE_NAME__, __LINE__); for(;;)
+#define Sys_Breakpoint() Sys_log("Breakpoint hit at %s:%d\n", __FILE_NAME__, __LINE__); asm volatile("int3")
 #define Sys_Step_Point() Sys_log("Step Point hit at %s:%d\n", __FILE_NAME__, __LINE__); getc()
 
 void serial_init();
@@ -61,7 +61,9 @@ void sys_serial_vlogf(const char* format, const char* file,
     const char* func, int line, va_list args);
 void sys_serial_logf(const char* frmt, const char* file, const char* func, int line, ...) __attribute__ ((format (printf, 1, 5)));
 
+void ktty_write(const char* data, size_t len);
 
+void dump_userspace_mappings(uint64_t* pml4);
 
 
 typedef enum {

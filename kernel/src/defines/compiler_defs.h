@@ -2,6 +2,8 @@
 
 #define _gcc_kernel_address_space 1
 #define _gcc_user_address_space 3
+#define _gcc_physical_address_space 10
+#define _gcc_virtual_address_space 11
 
 #define GCC_ATTR(attrib) __attribute__(attrib)
 
@@ -15,6 +17,9 @@
 
 
 #define __user _GCC_ADDR_SPACE(_gcc_user_address_space)
+
+#define __virtual _GCC_ADDR_SPACE(_gcc_virtual_address_space)
+#define __physical _GCC_ADDR_SPACE(_gcc_physical_address_space)
 
 static inline int copy_from_user(
     void *to,
@@ -42,3 +47,4 @@ static inline int copy_to_user(
 
     return 0;
 }
+

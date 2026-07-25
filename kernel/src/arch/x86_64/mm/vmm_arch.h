@@ -16,5 +16,8 @@
 #define PTE_NX        (1ULL << 63)
 
 #define PTE_ADDR_MASK 0x000FFFFFFFFFF000ULL
+#define PTE_FLAGS_MASK  (~PTE_ADDR_MASK)
 
 #define PTE_LOCAL_OWNED PTE_AVAIL1
+
+#define PT_ENTRIES           512

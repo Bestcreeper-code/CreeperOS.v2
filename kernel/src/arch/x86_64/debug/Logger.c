@@ -15,12 +15,14 @@
 #include "timer/time.h"
 
 
+
+
 static uint8_t current_fg = ANSI_WHITE;
 static uint8_t current_bg = ANSI_BG_BLACK;
 
 static volatile bool is_threaded = false;
 
-#define LOG_BUFFER_SIZE 256
+#define LOG_BUFFER_SIZE 512
 #define LOG_RING_PAGES 64
 
 typedef struct {
@@ -120,9 +122,13 @@ void sys_serial_vlogf(const char* format, const char* file,
             snprintf(serial_out, sizeof(serial_out), "%s", msg);
             serial_write_string(serial_out);
         }
-
-        printf("\e[0m[%llu.%03llu] %s",
-            (unsigned long long)secs, (unsigned long long)millis, msg);
+        if(!func && !line){
+            printf("%s",
+                msg);
+        } else {
+            printf("[%llu.%03llu] %s",
+                (unsigned long long)secs, (unsigned long long)millis, msg);
+        }
         return;
     }
 
@@ -148,7 +154,7 @@ void sys_serial_vlogf(const char* format, const char* file,
     } else {
         vsnprintf(slot->buf, LOG_BUFFER_SIZE, format, args);
     }
-
+    
     atomic_store_explicit(&slot->ready, 1, memory_order_release);
 }
 
@@ -166,3 +172,109 @@ void serial_log_hex(const char* label, uint32_t val) {
     sprintf(buffer,"%s: 0x%x", label, val);
     serial_write_string(buffer);
 }
+
+
+void ktty_write(const char* data, size_t len) {
+    if (!data || !len) return;
+
+    size_t written = 0;
+
+    while (written < len) {
+        size_t chunk = len - written;
+        if (chunk > LOG_BUFFER_SIZE - 1)
+            chunk = LOG_BUFFER_SIZE - 1;
+
+        if (!is_threaded) {
+            char msg[LOG_BUFFER_SIZE];
+            memcpy(msg, data + written, chunk);
+            msg[chunk] = '\0';
+
+            serial_write_string(msg);
+            printf("%s", msg);
+        } else {
+            uint32_t idx = atomic_fetch_add_explicit(&log_ring_queue_write_idx, 1,
+                memory_order_relaxed) % LOG_RING_QUEUE_SIZE;
+            log_slot_t *slot = &log_ring_queue[idx];
+
+            if (!atomic_load_explicit(&slot->ready, memory_order_acquire)) {
+                memcpy(slot->buf, data + written, chunk);
+                slot->buf[chunk] = '\0';
+                atomic_store_explicit(&slot->ready, 1, memory_order_release);
+            }
+            
+        }
+
+        written += chunk;
+    }
+}
+
+void dump_userspace_mappings(uint64_t* pml4) {
+    Sys_Debug("---- userspace mapping dump (PML4[0..255]) ----\n");
+    Sys_Debug("pml4 virt is %p\n",pml4);
+
+    for (int pml4_i = 0; pml4_i < 256; pml4_i++) {
+        uint64_t pml4_e = pml4[pml4_i];
+        if (!(pml4_e & PTE_PRESENT)) continue;
+
+        uint64_t* pdpt = (uint64_t*)((pml4_e & PTE_ADDR_MASK) + hhdm_offset);
+
+        for (int pdpt_i = 0; pdpt_i < 512; pdpt_i++) {
+            uint64_t pdpt_e = pdpt[pdpt_i];
+            if (!(pdpt_e & PTE_PRESENT)) continue;
+
+            uintptr_t va_pdpt = ((uintptr_t)pml4_i << 39) | ((uintptr_t)pdpt_i << 30);
+
+            if (pdpt_e & PTE_HUGE) {
+                Sys_Debug("1G  VA=%p -> PA=%p  flags: %s %s %s %s\n",
+                    (void*)va_pdpt,
+                    (void*)(pdpt_e & PTE_ADDR_MASK),
+                    (pdpt_e & PTE_WRITABLE) ? "W" : "-",
+                    (pdpt_e & PTE_USER)     ? "U" : "-",
+                    (pdpt_e & PTE_NX)       ? "NX" : "X",
+                    (pdpt_e & PTE_LOCAL_OWNED)  ? "O" : "NO");
+                continue;
+            }
+
+            uint64_t* pd = (uint64_t*)((pdpt_e & PTE_ADDR_MASK) + hhdm_offset);
+
+            for (int pd_i = 0; pd_i < 512; pd_i++) {
+                uint64_t pd_e = pd[pd_i];
+                if (!(pd_e & PTE_PRESENT)) continue;
+
+                uintptr_t va_pd = va_pdpt | ((uintptr_t)pd_i << 21);
+
+                if (pd_e & PTE_HUGE) {
+                    Sys_Debug("2M  VA=%p -> PA=%p  flags: %s %s %s %s\n",
+                        (void*)va_pd,
+                        (void*)(pd_e & PTE_ADDR_MASK),
+                        (pd_e & PTE_WRITABLE) ? "W" : "-",
+                        (pd_e & PTE_USER)     ? "U" : "-",
+                        (pd_e & PTE_NX)       ? "NX" : "X",
+                        (pd_e & PTE_LOCAL_OWNED)  ? "O" : "NO");
+                    continue;
+                }
+
+                uint64_t* pt = (uint64_t*)((pd_e & PTE_ADDR_MASK) + hhdm_offset);
+
+                for (int pt_i = 0; pt_i < 512; pt_i++) {
+                    uint64_t pt_e = pt[pt_i];
+                    if (!(pt_e & PTE_PRESENT)) continue;
+
+                    uintptr_t va = va_pd | ((uintptr_t)pt_i << 12);
+
+                    Sys_Debug("4K  VA=%p -> PA=%p  flags: %s %s %s %s\n",
+                        (void*)va,
+                        (void*)(pt_e & PTE_ADDR_MASK),
+                        (pt_e & PTE_WRITABLE) ? "W" : "-",
+                        (pt_e & PTE_USER)     ? "U" : "-",
+                        (pt_e & PTE_NX)       ? "NX" : "X",
+                        (pt_e & PTE_LOCAL_OWNED)  ? "O" : "NO");
+                }
+            }
+        }
+    }
+
+    Sys_Debug("---- end mapping dump ----\n");
+}
+
+

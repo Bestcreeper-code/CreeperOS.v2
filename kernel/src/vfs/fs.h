@@ -32,3 +32,5 @@ void fs_tree(struct dentry* d, int depth);
 
 struct inode* path_resolve_start(const char *path);
 int split_path(const char *path, char **out_parent, char **out_name);
+
+char* kpath_reverse(struct dentry* d);

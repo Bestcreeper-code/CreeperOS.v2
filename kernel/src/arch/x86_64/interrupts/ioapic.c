@@ -1,5 +1,6 @@
 #include "ioapic.h"
 #include "arch/vmm.h"   // PHYS_2_HHDM
+#include "memory/pmm.h"
 #include <stdbool.h>
 
 #define IOAPIC_REGSEL 0x00
@@ -7,7 +8,8 @@
 #define IOAPIC_REG_VER    0x01
 #define IOAPIC_REG_REDTBL 0x10
 
-static void* ioapic_base;
+physptr_t ioapic_base;
+
 
 static inline uint32_t ioapic_read(uint8_t reg) {
     *(volatile uint32_t*)((uint8_t*)ioapic_base + IOAPIC_REGSEL) = reg;
@@ -20,7 +22,7 @@ static inline void ioapic_write(uint8_t reg, uint32_t val) {
 }
 
 void ioapic_init(uintptr_t ioapic_phys_base) {
-    ioapic_base = PHYS_2_HHDM((void*)ioapic_phys_base);
+    ioapic_base = (physptr_t)PHYS_2_HHDM(ioapic_phys_base);
 
     uint32_t ver = ioapic_read(IOAPIC_REG_VER);
     uint8_t max_entries = (uint8_t)((ver >> 16) & 0xFF);

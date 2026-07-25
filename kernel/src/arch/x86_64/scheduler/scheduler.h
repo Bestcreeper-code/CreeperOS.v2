@@ -1,6 +1,7 @@
 #pragma once
 #include "arch/vmm.h"
 #include "asm/asm.h"
+#include "defines/compiler_defs.h"
 #include "defines/lists.h"
 #include "memory/pmm.h"
 #include "vfs/vfs.h"
@@ -12,7 +13,7 @@
 
 #define MAX_PID                     16384
 
-#define DEFAULT_STACK_PAGE_AMOUNT   32
+#define DEFAULT_STACK_PAGE_AMOUNT   128
 #define DEFAULT_STACK_PAGE_BYTES    (DEFAULT_STACK_PAGE_AMOUNT<<12)
 #define STACK_UPPER_USPACE_ADDR     0x0000800000000000ULL
 
@@ -38,9 +39,13 @@ typedef short pid_t;
 typedef struct linked_pcb_t {
     short pid;
     uint16_t state;
-#define PCB_STATE_RUNNING   0x0000
-#define PCB_STATE_ZOMBIE    0x0004
+#define PCB_STATE_RUNNING       0x0001
+#define PCB_STATE_STARTING      0x0002
+#define PCB_STATE_DEAD        0x0004
     char* name;
+
+    kuid_t uid;
+    kgid_t gid;
 
     heap_t heap;
     stack_t kernel_stack, user_stack;
@@ -55,8 +60,12 @@ typedef struct linked_pcb_t {
 
     struct inode* cwd_i;
 
+    uintptr_t fs_base, gs_base;
+
+    GCC_ATTR((aligned(16))) uint8_t fp_state[512];
+
     struct hlist_node list_node;
-} linked_pcb;
+} GCC_ATTR((aligned(16))) linked_pcb;
 
 typedef struct __attribute__((packed)) {
     uint64_t r15, r14, r13, r12, r11, r10, r9, r8;
@@ -78,7 +87,8 @@ int scheduler_init();
 
 void* sched_next_process_core(uint64_t saved_rsp);
 
-linked_pcb* new_pcb(physptr_t page_dir, const char* name, uint64_t* rsp, stack_t k_stack, stack_t us_stack);
+linked_pcb* new_pcb(physptr_t page_dir, const char* name, uint64_t* rsp,
+    stack_t k_stack, stack_t us_stack, uint16_t starting_state);
 
 
 int kill_ktask(linked_pcb* pcb);

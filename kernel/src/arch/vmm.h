@@ -1,6 +1,7 @@
 #pragma once
 #include <stdint.h>
 #include <stddef.h>
+#include "defines/compiler_defs.h"
 #include "memory/pmm.h"
 #include "mm/vmm_arch.h"
 
@@ -16,7 +17,8 @@
 #define HHDM_SIZE_GB 4096
 #endif
 
-#define PHYS_2_HHDM(phys) (void*)((uintptr_t)phys + HHDM_VBASE)
+
+#define PHYS_2_HHDM(phys) (void*)(((uintptr_t)phys) + HHDM_VBASE)
 
 _Static_assert(HHDM_SIZE_GB > 0, "HHDM_SIZE_GB must be positive");
 _Static_assert(HHDM_SIZE_GB <= 255ULL * 512, "HHDM_SIZE_GB would overlap kernel's PML4 entry");

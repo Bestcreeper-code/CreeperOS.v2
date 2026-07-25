@@ -133,7 +133,7 @@ int k_ramfile_create(const char* path, uintptr_t start, size_t size,
         umode_t mode, bool fixed_size, bool excl) {
     RET_IF(!path, -E_INVAL);
 
-    int res = kpath_create_force(root_dentry->inode, path, mode, excl);
+    int res = kpath_create(root_dentry->inode, path, mode, excl);
     RET_IF(res < 0, res);
 
     struct dentry* dentry = kpath_lookup(root_dentry->inode, path);

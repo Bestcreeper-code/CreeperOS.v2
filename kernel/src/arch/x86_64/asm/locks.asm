@@ -6,6 +6,8 @@ global try_acquire_lock
 
 ; void acquire_lock(uintptr_t *addr, uint8_t bit)
 acquire_lock:
+mov rax ,1
+ret
     and  rsi, 63
 
 .try:
@@ -24,6 +26,8 @@ acquire_lock:
 
 ; int try_acquire_lock(uintptr_t *addr, uint8_t bit)
 try_acquire_lock:
+mov rax ,1
+ret
     and  rsi, 63
     lock bts qword [rdi], rsi
     jc   .fail

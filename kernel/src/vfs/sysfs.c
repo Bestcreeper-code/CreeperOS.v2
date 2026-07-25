@@ -12,12 +12,13 @@
 
 
 int sysfs_init(){
-    kpath_mkdir(root_dentry->inode, "/sys", 0555);
-    kpath_mkdir(root_dentry->inode, "/sys/devices", 0655);    
-    kpath_mkdir(root_dentry->inode, "/sys/class", 0655);    
-    kpath_mkdir(root_dentry->inode, "/sys/class/block", 0655);    
-    kpath_mkdir(root_dentry->inode, "/sys/class/input", 0655);    
+    kpath_mkdir(root_dentry->inode, "/sys", 0755);
+    kpath_mkdir(root_dentry->inode, "/sys/devices", 0755);    
+    kpath_mkdir(root_dentry->inode, "/sys/class", 0755);    
+    kpath_mkdir(root_dentry->inode, "/sys/class/block", 0755);    
+    kpath_mkdir(root_dentry->inode, "/sys/class/input", 0755);    
 }
+
 
 
 int sysfs_register_block(struct block_device* blkdev) {
@@ -26,7 +27,7 @@ int sysfs_register_block(struct block_device* blkdev) {
     char dir[64];
     sprintf(dir, "/sys/class/block/%d", blkdev->name);
 
-    int res = kpath_mkdir(root_dentry->inode, dir, 0555);
+    int res = kpath_mkdir(root_dentry->inode, dir, 0755);
     RET_IF(res < 0, res);
 
     //name
@@ -40,7 +41,7 @@ int sysfs_register_block(struct block_device* blkdev) {
 
     sprintf(buf, "%s\n", blkdev->name);
 
-    k_ramfile_create(path, (uintptr_t)buf, len, S_IFREG | 0444, true, false);
+    k_ramfile_create(path, (uintptr_t)buf, len, S_IFREG | 0744, true, false);
 
 
     //size
@@ -52,7 +53,7 @@ int sysfs_register_block(struct block_device* blkdev) {
 
     len = sprintf(buf, "%llu\n", blkdev->size);
 
-    k_ramfile_create(path, (uintptr_t)buf, len, S_IFREG | 0444, true, false);
+    k_ramfile_create(path, (uintptr_t)buf, len, S_IFREG | 0744, true, false);
     
 
     //block_size
@@ -64,7 +65,7 @@ int sysfs_register_block(struct block_device* blkdev) {
 
     len = sprintf(buf, "%zu\n", blkdev->block_size);
 
-    k_ramfile_create(path, (uintptr_t)buf, len, S_IFREG | 0444, true, false);
+    k_ramfile_create(path, (uintptr_t)buf, len, S_IFREG | 0744, true, false);
 
 
     return 0;
@@ -76,9 +77,9 @@ int sysfs_register_input(struct input_device* idev) {
     RET_IF(!idev, -E_INVAL);
 
     char dir[64];
-    sprintf(dir, "/sys/class/input/input%d", idev->id);
+    sprintf(dir, "/sys/class/input/input%u", idev->id);
 
-    int res = kpath_mkdir(root_dentry->inode, dir, 0555);
+    int res = kpath_mkdir(root_dentry->inode, dir, 0755);
     RET_IF(res < 0, res);
 
     char path[96];
@@ -94,7 +95,7 @@ int sysfs_register_input(struct input_device* idev) {
 
     sprintf(buf, "%s\n", idev->name);
 
-    k_ramfile_create(path, (uintptr_t)buf, len, S_IFREG | 0444, true, false);
+    k_ramfile_create(path, (uintptr_t)buf, len, S_IFREG | 0744, true, false);
 
     //id
     sprintf(path, "%s/id", dir);
@@ -104,7 +105,7 @@ int sysfs_register_input(struct input_device* idev) {
 
     len = sprintf(buf, "%d\n", idev->id);
 
-    k_ramfile_create(path, (uintptr_t)buf, len, S_IFREG | 0444, true, false);
+    k_ramfile_create(path, (uintptr_t)buf, len, S_IFREG | 0744, true, false);
 
     return 0;
 }

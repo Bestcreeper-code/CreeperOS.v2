@@ -51,14 +51,32 @@
 #define LOOKUP_IS_SCOPED (LOOKUP_BENEATH | LOOKUP_IN_ROOT)
 
 
-enum file_flag {
-    O_RD        = 0x0,
-    O_WR        = 0x1,
-    O_RW        = 0X2,
-    O_ACCESS    = 0x3,
-    
-    O_CREAT     = 0x10
-};
+#define O_PATH 010000000
+
+#define O_ACCMODE (03 | O_PATH)
+#define O_RDONLY   00
+#define O_WRONLY   01
+#define O_RDWR     02
+
+#define O_CREAT         0100
+#define O_EXCL          0200
+#define O_NOCTTY        0400
+#define O_TRUNC        01000
+#define O_APPEND       02000
+#define O_NONBLOCK     04000
+#define O_DSYNC       010000
+#define O_ASYNC       020000
+#define O_CLOEXEC   02000000
+#define O_SYNC      04010000
+#define O_RSYNC     04010000
+#define O_NOATIME   01000000
+
+
+#define AT_FDCWD -100
+#define AT_SYMLINK_NOFOLLOW 0x100
+#define AT_REMOVEDIR 0x200
+#define AT_SYMLINK_FOLLOW 0x400
+#define AT_EACCESS 0x200
 
 typedef struct file {
     struct inode* f_inode;          // points to the file/directory inode
@@ -75,10 +93,12 @@ _Static_assert(sizeof(file) ==64, "size must be 64 bits");
 
 struct file_operations {
     // struct module *owner; later waybe but commented out to remember
-    int (*open) (struct inode *, struct file *);
-    ssize_t (*read) (struct file *, char  *, size_t, loff_t *);
-	ssize_t (*write) (struct file *, const char  *, size_t, loff_t *);
-    int (*release) (struct inode *, struct file *);
+    int (*open) (struct inode*, struct file*);
+    ssize_t (*read) (struct file*, char*, size_t, loff_t*);
+	ssize_t (*write) (struct file*, const char*, size_t, loff_t*);
+    int (*release) (struct inode*, struct file*);
+
+    int (*ioctl)(struct file*, int op, unsigned long);
 };
 
 struct inode_operations{
@@ -86,7 +106,7 @@ struct inode_operations{
     int (*mkdir)(struct inode *, struct dentry *, umode_t);
     int (*rmdir)(struct inode *, struct dentry *);
     int (*create)(struct inode *, struct dentry *, umode_t, bool);
-    int (*unlink)(struct inode *, struct dentry *);
+    int (*unlink)(struct inode *, struct dentry *); 
 
     // int (*getattr)(const struct path *, struct kstat *, uint32_t, unsigned int);
     // int (*setattr)(struct dentry *, struct iattr *);
@@ -149,6 +169,27 @@ typedef struct dentry {
     atomic_uint d_count;
 } dentry;
 
+//getdents64 (Linux styles)
+
+typedef struct linux_dirent64 {
+    uint64_t d_ino;
+    int64_t  d_off;
+    uint16_t d_reclen;
+    uint8_t  d_type;
+    char     d_name[];  
+} linux_dirent64_t;
+
+#define DT_UNKNOWN 0
+#define DT_FIFO    1
+#define DT_CHR     2
+#define DT_DIR     4
+#define DT_BLK     6
+#define DT_REG     8
+#define DT_LNK     10
+#define DT_SOCK    12
+#define DT_WHT     14
+
+ssize_t vfs_getdents64(struct file* file, char* buf, size_t count);
 
 
 extern struct inode_operations def_vfs_i_ops;
@@ -157,5 +198,7 @@ extern struct dentry* root_dentry;
 struct dentry* vfs_lookup(struct inode* dir, struct dentry* file, unsigned int flags);
 int vfs_create(struct inode* dir, struct dentry* dentry, umode_t mode, bool excl);
 int vfs_mkdir(struct inode* dir, struct dentry* dentry, umode_t mode);
+
+ssize_t vfs_getdents64(struct file* file, char* buf, size_t count);
 
 int vfs_inv_func();

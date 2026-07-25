@@ -26,4 +26,4 @@ typedef struct input_device {
 struct input_device* register_input_device(const char *name, 
         struct input_device_ops* ops, void *private_data);
 int unregister_input_device(struct input_device* idev);
-int Get_Input_Device_Amount();
+int get_input_device_amount();

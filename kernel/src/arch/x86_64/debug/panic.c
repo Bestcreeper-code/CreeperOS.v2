@@ -4,6 +4,7 @@
 #include "arch/vmm.h"
 #include "debug/Logger.h"
 #include "printf/printf.h"
+#include "scheduler/scheduler.h"
 #include "timer/time.h"
 #include "asm/asm.h"
 #include <stddef.h>
@@ -194,10 +195,13 @@ void _panic_handler(uint64_t isr_index, uint64_t err_code, cpu_registers_t* regs
             : "Unknown Crash";
     Sys_log_NoPos(ESC_RED);
     Sys_log_NoPos("=======================================================================\n");
-    Sys_log_NoPos("KERNEL PANIK -> ISR Index: %lu (%s), Error Code: %lx\n",
+    Sys_log_NoPos("PANIK -> ISR Index: %lu (%s), Error Code: %lx\n",
         isr_index, error_name, err_code);
 
-    Sys_log_NoPos(" A critical error has occurred:\n");
+    Sys_log_NoPos(" A critical error has occurred");
+    if(_scheduler_current_process && _scheduler_current_process->name) 
+        Sys_log_NoPos(" in process %s (pid: %d)", _scheduler_current_process->name, _scheduler_current_process->pid);
+    Sys_log_NoPos(":\n");
 
     Sys_log_NoPos(" Error Code: %s (%03ld: %lx)\n",
         error_name, isr_index, err_code);

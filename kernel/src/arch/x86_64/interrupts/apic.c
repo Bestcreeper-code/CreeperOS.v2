@@ -8,6 +8,7 @@
 #include "debug/Logger.h"
 #include "interrupts/interrupts.h"
 #include "interrupts/ioapic.h"
+#include "memory/pmm.h"
 #include "timer/timers.h"
 #include "uACPI/include/uacpi/acpi.h"
 #include "requests.h"
@@ -76,7 +77,7 @@ int lapic_init() {
         if(strncmp(hdr->signature, ACPI_MADT_SIGNATURE, sizeof(ACPI_MADT_SIGNATURE)-1) == 0) {
             struct acpi_madt* madt = (struct acpi_madt*)hdr;
 
-            lapic_mmio_base = PHYS_2_HHDM( (void*)(uintptr_t)madt->local_interrupt_controller_address );
+            lapic_mmio_base = PHYS_2_HHDM( (physptr_t)(uintptr_t)madt->local_interrupt_controller_address );
 
             bsp_lapic_id = (uint8_t)((lapic_mmio_read(LAPIC_REG_ID) >> 24) & 0xFF);
 

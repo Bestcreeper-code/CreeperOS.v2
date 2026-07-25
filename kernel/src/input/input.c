@@ -6,13 +6,14 @@
 #include "defines/err_codes.h"
 #include "defines/container_of.h"
 #include "defines/helpers.h"
+#include "vfs/devfs.h"
 #include "vfs/sysfs.h"
 #include "vfs/fs.h"
 #include "config.h"
 
 #include <stddef.h>
-
-size_t _input_id_map[128 / (sizeof(size_t) * 8)];
+#define INPUT_ID_MAP_LENGTH (128 / (sizeof(size_t) * 8))
+size_t _input_id_map[INPUT_ID_MAP_LENGTH] = {[0 ... INPUT_ID_MAP_LENGTH-1]=0xFFFFFFFFULL};
 
 struct list_head* input_device_list_start;
 short input_device_amount;
@@ -30,9 +31,9 @@ struct input_device* register_input_device(const char *name, struct input_device
     idev->ops = ops;
     idev->private_data = private_data;
 
-    idev->id = wbitmap_alloc_1_first(
-        _input_id_map,
-        arr_lengthof(_input_id_map)
+    idev->id = bitmap_alloc_1_first(
+        (char*)_input_id_map,
+        sizeof(_input_id_map)
     );
 
     if (!input_device_list_start) {
@@ -60,11 +61,18 @@ vfs_reg:
 
     // sysfs registration
     int res = sysfs_register_input(idev);
-    if(res != 0){
-        Sys_Error("sysfs input registration failed (%d)\n",res);
+    if (res != 0) {
+        Sys_Error("sysfs input registration failed (%d)\n", res);
         return NULL;
     }
-    
+
+    // devfs registration
+    res = devfs_register_input(idev);
+    if (res != 0) {
+        Sys_Error("devfs input registration failed (%d)\n", res);
+        return NULL;
+    }
+
     return idev;
 }
 

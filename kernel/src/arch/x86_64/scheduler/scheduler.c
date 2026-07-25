@@ -16,6 +16,7 @@
 #include "string/string.h"
 #include "vfs/vfs.h"
 
+#include "defines/auxv.h"
 #include <stddef.h>
 #include <stdint.h>
 
@@ -35,6 +36,8 @@ uint64_t pid_bitmap[_PID_BITMAP_SIZE] = {[0 ... _PID_BITMAP_SIZE-1] = 0xFFFFFFFF
 static size_t scheduler_lock = 0;
 #define SCHED_LOCK_BIT 0
 
+bool pid0_used = false;
+
 pid_t _get_unused_pid() {
     acquire_lock(&scheduler_lock, SCHED_LOCK_BIT);
 
@@ -43,9 +46,13 @@ pid_t _get_unused_pid() {
     for (int i = 0; i < _PID_BITMAP_SIZE; i++) {
         uint64_t* current = &pid_bitmap[i];
 
+
         if (!*current) continue;
 
         for (int j = 0; j < 64; j++) {
+            
+            if (pid0_used && i == 0 && j == 0) continue;
+
             if (*current & (1ULL << j)) {
                 *current &= ~(1ULL << j);
                 result = (pid_t)(i * 64 + j);
@@ -88,36 +95,33 @@ void _log_all_processes(void) {
     while (n) {
         linked_pcb *p = container_of(n, linked_pcb, list_node);
 
-        Sys_log(
+        Sys_Info(
             "pid=%u "
             "state=0x%04x "
             "name=%s "
             "cr3=0x%016llx "
             "k_rsp=0x%016llx "
-            "heap=[0x%016llx-0x%016llx] (%zu) "
-            "kstack=[0x%016llx-0x%016llx] (%zu) "
-            "ustack=[0x%016llx-0x%016llx] (%zu) "
+            "heap=[0x%016llx-0x%016llx] "
+            "kstack=[0x%016llx-0x%016llx] "
+            "ustack=[0x%016llx-0x%016llx] "
             "files=%p "
             "cwd=%p "
             "exit=%d "
-            "list_node=%p\n",
+            "list_node=%p\n\n",
             (unsigned)p->pid,
             (unsigned)p->state,
             p->name ? p->name : "(null)",
             (unsigned long long)p->cr3,
             (unsigned long long)p->k_rsp,
         
-            (unsigned long long)p->heap.bottom,
-            (unsigned long long)p->heap.top,
-            p->heap.size,
+            (unsigned long long)p->heap.lower,
+            (unsigned long long)p->heap.higher,
         
             (unsigned long long)p->kernel_stack.bottom,
             (unsigned long long)p->kernel_stack.top,
-            p->kernel_stack.size,
         
             (unsigned long long)p->user_stack.bottom,
             (unsigned long long)p->user_stack.top,
-            p->user_stack.size,
         
             (void *)p->opened_file_table,
             (void *)p->cwd_i,
@@ -136,8 +140,8 @@ void _log_all_processes(void) {
 
 
 linked_pcb* new_pcb(physptr_t page_dir, const char* name, uint64_t* rsp,
-                      stack_t k_stack, stack_t us_stack) {
-    linked_pcb* new_pcb = (linked_pcb*)kmalloc(sizeof(linked_pcb));
+                      stack_t k_stack, stack_t us_stack, uint16_t starting_state) {
+    linked_pcb* new_pcb = (linked_pcb*)struct_kmalloc_align(linked_pcb);
     if (!new_pcb) return NULL;
 
     pid_t pid = _get_unused_pid();
@@ -154,6 +158,8 @@ linked_pcb* new_pcb(physptr_t page_dir, const char* name, uint64_t* rsp,
     new_pcb->k_rsp = *rsp;
     new_pcb->cr3 = page_dir;
     new_pcb->list_node.next = NULL;
+
+    new_pcb->state = starting_state;
 
     acquire_lock(&scheduler_lock, SCHED_LOCK_BIT);
 
@@ -229,24 +235,57 @@ int kill_us_task(linked_pcb* pcb) {
 }
 
 
+static void reaper_ktask(void) {
+    while (true) {
+        linked_pcb* victim = NULL;
+
+        acquire_lock(&scheduler_lock, SCHED_LOCK_BIT);
+        struct hlist_node* n = _scheduler_process_list_head.first;
+        while (n) {
+            linked_pcb* p = container_of(n, linked_pcb, list_node);
+            if (p->state & PCB_STATE_DEAD) {
+                victim = p;
+                break;
+            }
+            n = n->next;
+        }
+        release_lock(&scheduler_lock, SCHED_LOCK_BIT);
+
+        if (!victim) {
+            _yield();
+            continue;
+        }
+
+        if (victim->cr3 == kernel_pagedir_phys)
+            kill_ktask(victim);
+        else
+            kill_us_task(victim);
+    }
+}
+
+
 int scheduler_init() {
     Sys_Info("Initing PIT\n");
     pit_init();
     Sys_Info("Initing Scheduler\n");
-    pid_bitmap[0] &= ~(1ULL << 0);
 
     
-
     uint64_t tmp = 0x200000;
-
     new_pcb(kernel_pagedir_phys, "Kernel", &tmp,
         (stack_t){0x200000, 0x1FF000, DEFAULT_STACK_PAGE_BYTES},
-        (stack_t){0});
-
+        (stack_t){0},
+        PCB_STATE_RUNNING
+    );
+    
     _scheduler_current_process =
         container_of(_scheduler_process_list_head.first, linked_pcb, list_node);
 
+    pid0_used = true;
+
     enable_scheduler();
+// #fix teh damn reaper killing himself since ktask are shit now smh
+    ktask_start(reaper_ktask, "reaper");
+
     Sys_Success("Scheduler Inited\n");
     return 0;
 }
@@ -292,7 +331,8 @@ linked_pcb* ktask_start(void* entry, char* name) {
 
             .size = DEFAULT_STACK_PAGE_BYTES
         },
-        (stack_t){0}
+        (stack_t){0},
+        PCB_STATE_RUNNING
     );
     return res;
 }
@@ -324,42 +364,42 @@ static size_t _argv_len(char** arr) {
     if (arr) while (arr[n]) n++;
     return n;
 }
-
-static bool _setup_user_args(uint64_t* p_dir, char** argv, char** envp,
-                              uint64_t* out_argc,
-                              uint64_t* out_argv_uva,
-                              uint64_t* out_envp_uva) {
+static bool _setup_user_stack_args(void* k_stack_top, uint64_t u_stack_top,
+                                    char** argv, char** envp,
+                                    uint64_t* out_user_rsp) {
     size_t argc = _argv_len(argv);
     size_t envc = _argv_len(envp);
-
-    size_t argv_ptrs_size = (argc + 1) * sizeof(char*);
-    size_t envp_ptrs_size = (envc + 1) * sizeof(char*);
 
     size_t str_bytes = 0;
     for (size_t i = 0; i < argc; i++) str_bytes += strlen(argv[i]) + 1;
     for (size_t i = 0; i < envc; i++) str_bytes += strlen(envp[i]) + 1;
 
-    size_t total = argv_ptrs_size + envp_ptrs_size + str_bytes;
-    size_t page_count = (total + PAGE_SIZE_4K - 1) / PAGE_SIZE_4K;
-    if (page_count == 0) page_count = 1;
-    if (page_count > USER_ARGS_MAX_PAGES) return false;
+    size_t argc_bytes = sizeof(uint64_t);
+    size_t argv_bytes = (argc + 1) * sizeof(uint64_t);
+    size_t envp_bytes = (envc + 1) * sizeof(uint64_t);
+    size_t auxv_bytes = 48 * sizeof(uint64_t); //margin becaus i'm lazy
 
-    physptr_t args_pages = pmm_alloc_pages(page_count);
-    if (!args_pages) return false;
-
-    map_4k_pages(p_dir, USER_ARGS_USPACE_ADDR, args_pages, page_count,
-                 PTE_USER | PTE_WRITABLE | PTE_NX | PTE_LOCAL_OWNED);
+    size_t fixed_bytes = argc_bytes + argv_bytes + envp_bytes + auxv_bytes;
 
     
-    uint8_t* kbase = (uint8_t*)PHYS_2_HHDM(args_pages);
-    memset(kbase, 0, page_count * PAGE_SIZE_4K);
+    size_t unaligned = fixed_bytes + str_bytes;
+    size_t pad = (16 - (unaligned % 16)) % 16;
 
-    uint64_t* k_argv_ptrs = (uint64_t*)kbase;
-    uint64_t* k_envp_ptrs = (uint64_t*)(kbase + argv_ptrs_size);
-    uint8_t*  k_strings   = kbase + argv_ptrs_size + envp_ptrs_size;
-    uint64_t  strings_uva = USER_ARGS_USPACE_ADDR + argv_ptrs_size + envp_ptrs_size;
-    size_t    str_off     = 0;
+    size_t total = fixed_bytes + pad + str_bytes;
+    if (total > DEFAULT_STACK_PAGE_BYTES) return false; //i swear if i hit that...
 
+    uint8_t* base     = (uint8_t*)k_stack_top - total;
+    uint64_t base_uva = u_stack_top - total;
+    memset(base, 0, total);
+
+    uint64_t* k_argc      = (uint64_t*)base;
+    uint64_t* k_argv_ptrs = (uint64_t*)(base + argc_bytes);
+    uint64_t* k_envp_ptrs = (uint64_t*)((uint8_t*)k_argv_ptrs + argv_bytes);
+    uint64_t* k_auxv      = (uint64_t*)((uint8_t*)k_envp_ptrs + envp_bytes);
+    uint8_t*  k_strings   = (uint8_t*)k_auxv + auxv_bytes + pad;
+    uint64_t  strings_uva = base_uva + (fixed_bytes + pad);
+
+    size_t str_off = 0;
     for (size_t i = 0; i < argc; i++) {
         size_t len = strlen(argv[i]) + 1;
         memcpy(k_strings + str_off, argv[i], len);
@@ -376,13 +416,15 @@ static bool _setup_user_args(uint64_t* p_dir, char** argv, char** envp,
     }
     k_envp_ptrs[envc] = 0;
 
-    *out_argc     = argc;
-    *out_argv_uva = USER_ARGS_USPACE_ADDR;
-    *out_envp_uva = USER_ARGS_USPACE_ADDR + argv_ptrs_size;
+	size_t k = 0;
+    k_auxv[k++] = AT_PAGESZ; k_auxv[k++] = PAGE_SIZE_4K;
+    k_auxv[k++] = AT_RANDOM; k_auxv[k++] = u_stack_top-16;
+    k_auxv[k++] = AT_NULL;   k_auxv[k++] = 0;
+
+    *k_argc = argc;
+    *out_user_rsp = base_uva;
     return true;
 }
-
-
 
 void _build_user_stack_frame(uint64_t** stack_top, uint64_t entry,
                         uint64_t user_rsp, uint16_t cs, uint16_t ss) {
@@ -400,9 +442,6 @@ void _build_user_stack_frame(uint64_t** stack_top, uint64_t entry,
 
     *stack_top = (uint64_t*)frame;
 }
-
-
-
 
 linked_pcb* us_task_start(void* entry, char* name, physptr_t page_dir,
                            char** argv, char** envp) {
@@ -439,9 +478,12 @@ linked_pcb* us_task_start(void* entry, char* name, physptr_t page_dir,
     }
 
     
-    uint64_t u_argc = 0, u_argv = 0, u_envp = 0;
-    if (!_setup_user_args(p_dir, argv, envp, &u_argc, &u_argv, &u_envp)) {
-        Sys_Error("task '%s': unable to set up argv/envp\n", name);
+    void* us_stack_khost_top = (uint8_t*)PHYS_2_HHDM(us_stack_bott) + DEFAULT_STACK_PAGE_BYTES;
+
+    uint64_t user_rsp;
+    if (!_setup_user_stack_args(us_stack_khost_top, STACK_UPPER_USPACE_ADDR,
+                                 argv, envp, &user_rsp)) {
+        Sys_Error("task '%s': unable to set up argv/envp on user stack\n", name);
         return NULL;
     }
 
@@ -450,15 +492,9 @@ linked_pcb* us_task_start(void* entry, char* name, physptr_t page_dir,
     _build_user_stack_frame(
         &stack_top,
         (uint64_t)entry,
-        STACK_UPPER_USPACE_ADDR,
+        user_rsp,
         USER_CODE_SEGMENT, USER_DATA_SEGMENT
     );
-
-    
-    process_stack_frame* frame = (process_stack_frame*)stack_top;
-    frame->rdi = u_argc;
-    frame->rsi = u_argv;
-    frame->rdx = u_envp;
 
     linked_pcb* res = new_pcb(
         page_dir,
@@ -473,13 +509,9 @@ linked_pcb* us_task_start(void* entry, char* name, physptr_t page_dir,
             .bottom = us_stack_bott,
             .top = us_stack_bott + DEFAULT_STACK_PAGE_BYTES,
             .size = DEFAULT_STACK_PAGE_BYTES
-        }
+        },
+        PCB_STATE_STARTING
     );
-
-    
-
-
-
 
     physptr_t heap_pages = pmm_alloc_pages(DEFAULT_USER_HEAP_PAGES);
     if(!heap_pages) {
@@ -492,14 +524,10 @@ linked_pcb* us_task_start(void* entry, char* name, physptr_t page_dir,
         DEFAULT_USER_HEAP_START, heap_pages,
         DEFAULT_USER_HEAP_PAGES, PTE_USER | PTE_WRITABLE | PTE_LOCAL_OWNED
     );
-    
-    res->heap.bottom = DEFAULT_USER_HEAP_START;
-    res->heap.top = DEFAULT_USER_HEAP_END;
+
+    res->heap.lower = DEFAULT_USER_HEAP_START;
+    res->heap.higher = DEFAULT_USER_HEAP_END;
     res->heap.size = DEFAULT_USER_HEAP_PAGES * PAGE_SIZE_4K;
-
-
-
-
 
     physptr_t ft_pages = pmm_alloc_pages(256 / (PAGE_SIZE_4K/sizeof(file)));
     if(!ft_pages) {
@@ -512,11 +540,17 @@ linked_pcb* us_task_start(void* entry, char* name, physptr_t page_dir,
         DEFAULT_FILE_TABLE_START, ft_pages,
         DEFAULT_FILE_TABLE_PAGES, PTE_WRITABLE | PTE_LOCAL_OWNED
     );
-    
+
     res->opened_file_table = DEFAULT_FILE_TABLE_START;
 
+    res->fs_base = 0;
+    res->gs_base = 0;
 
+    
+    memset(res->fp_state, 0, sizeof(res->fp_state));// to not blow up once switching
+    *(uint32_t*)(res->fp_state + 24) = 0x1F80; // MXCSR def
 
+    res->state = PCB_STATE_RUNNING;
     Sys_Success("task '%s': created sucesssfully..?\n", name);
     return res;
 }
@@ -534,9 +568,16 @@ linked_pcb* us_task_start(void* entry, char* name, physptr_t page_dir,
 
 
 
+extern uint8_t fpu_enabled;
 void* sched_next_process_core(uint64_t saved_rsp) {
     linked_pcb* current = _scheduler_current_process;
     current->k_rsp = saved_rsp;
+
+    current->fs_base = rdmsr(MSR_FS_BASE);
+    current->gs_base = rdmsr(MSR_GS_BASE);
+    if (fpu_enabled) {
+        fxsave_state(current->fp_state);
+    }
 
 #if SCHEDULER_PROC_LIST_DEBUG
     static uint32_t _tick = 0;
@@ -547,10 +588,17 @@ void* sched_next_process_core(uint64_t saved_rsp) {
 #endif
 
 #if SCHEDULER_TICK_SERIAL_DEBUG
+static int tick_ctr = 0;
+if(tick_ctr>=1000){
     serial_write_string("exiting proc ");
     serial_log_hex("",current->pid);
     serial_write_char('\n');
+    
+}
 #endif
+
+    acquire_lock(&scheduler_lock, SCHED_LOCK_BIT);
+
     struct hlist_node* next_node = current->list_node.next;
 
 get_next:
@@ -559,20 +607,29 @@ get_next:
 
     linked_pcb* next = container_of(next_node, linked_pcb, list_node);
 #if SCHEDULER_TICK_SERIAL_DEBUG
+if(tick_ctr>=1000){
     serial_write_string("running proc ");
     serial_log_hex("",next->pid);
     serial_write_char('\n');
+    tick_ctr=0;
+}
 #endif
-    if (next->state & PCB_STATE_ZOMBIE) {
+    if (!next || !(next->state & PCB_STATE_RUNNING)) {
         next_node = next->list_node.next;
-        if(next->cr3 == kernel_pagedir_phys) kill_ktask(next);
-        else kill_us_task(next);
         goto get_next;
     }
 
     _scheduler_current_process = next;
 
+    release_lock(&scheduler_lock, SCHED_LOCK_BIT);
+
     __asm__ volatile ("mov %0, %%cr3" :: "r"(next->cr3) : "memory");
+    
+    wrmsr(MSR_FS_BASE, next->fs_base);
+    wrmsr(MSR_GS_BASE, next->gs_base);
+    if (fpu_enabled) {
+        fxrstor_state(next->fp_state);
+    }
 
     set_tss_sp(next->k_rsp);
 

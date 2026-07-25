@@ -123,9 +123,10 @@ int kpath_mkdir(struct inode* start, const char* path, umode_t mode)
         return -E_INVAL;
 
     char* copy = strdup(path);
+
     if (!copy)
         return -E_NOMEM;
-
+    
     char* last_slash = strrchr(copy, '/');
     char* parent_path;
     char* name;
@@ -138,7 +139,7 @@ int kpath_mkdir(struct inode* start, const char* path, umode_t mode)
         parent_path = ".";
         name = copy;
     }
-
+    
     struct dentry* dir = kpath_lookup(start, parent_path);
     if (!dir) { kfree(copy); return -E_NOENT; }
 
@@ -362,9 +363,59 @@ int split_path(const char* path, char **out_parent, char **out_name)
     return 0;
 }
 
+char* kpath_reverse(struct dentry* d)
+{
+    if (!d)
+        return NULL;
+
+    /* Root */
+    if (d->parent == NULL) {
+        char *path = kmalloc(2);
+        if (!path)
+            return NULL;
+
+        path[0] = '/';
+        path[1] = '\0';
+        return path;
+    }
+
+    
+    size_t len = 1;
+
+    struct dentry* cur = d;
+    while (cur && cur->parent) {
+        len += strlen(cur->name) + 1;
+        cur = cur->parent;
+    }
+
+    char* path = kmalloc(len);
+    if (!path)
+        return NULL;
+
+    path[len - 1] = '\0';
+
+    char* p = path + len - 1;
+
+    cur = d;
+    while (cur && cur->parent) {
+        size_t n = strlen(cur->name);
+
+        p -= n;
+        memcpy(p, cur->name, n);
+
+        *--p = '/';
+
+        cur = cur->parent;
+    }
+
+    return path;
+}
+
 /*
 int (*mkdir)(struct inode* , struct dentry* , umode_t);
     int (*rmdir)(struct inode* , struct dentry* );
     int (*create)(struct inode* , struct dentry* , umode_t, bool);
     int (*unlink)(struct inode* , struct dentry* );
 */
+
+

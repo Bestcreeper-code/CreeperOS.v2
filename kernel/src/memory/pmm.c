@@ -20,11 +20,11 @@ static inline void pmm_lock_release(){
     release_lock(&pmm_lock, 0);
 }
 
-static inline void *phys_to_virt(uintptr_t phys) {
+static inline void* phys_to_virt(uintptr_t phys) {
     return (void *)(phys + hhdm_request.response->offset);
 }
 
-static uint8_t* bitmap;
+static uint8_t* bitmap;//1=free ; 0= used
 static size_t bitmap_bits;
 static size_t bitmap_next = 0;
 
@@ -60,18 +60,21 @@ static size_t bitmap_find_clear() {
 
 static size_t bitmap_find_clear_range(size_t count) {
     size_t run = 0, start = 0;
-    for (size_t i = 0; i < total_pages; i++) {
+    for (size_t i = bitmap_next; i < total_pages; i++) {
         if (!bitmap_test(i)) {
             if (run == 0) start = i;
-            if (++run == count) return start;
-        } else {
-            run = 0;
-        }
+            if (++run == count) { bitmap_next = i + 1; return start; }
+        } else run = 0;
+    }
+    run = 0;
+    for (size_t i = 0; i < bitmap_next; i++) {
+        if (!bitmap_test(i)) {
+            if (run == 0) start = i;
+            if (++run == count) { bitmap_next = i + 1; return start; }
+        } else run = 0;
     }
     return SIZE_MAX;
 }
-
-
 
 
 void pmm_init() {
@@ -102,6 +105,10 @@ void pmm_init() {
 
     bitmap = phys_to_virt(bitmap_phys);
     memset(bitmap, 0xFF, bitmap_size);
+    if (!bitmap_test(0)) {
+        bitmap_set(0);
+        free_pages--;
+    }
     for (uint64_t i = 0; i < mm->entry_count; i++) {
         
         struct limine_memmap_entry *e = mm->entries[i];
