@@ -21,6 +21,7 @@ struct CreeperOsSysdepTags :
 	Read,
 	Open,
 	VmMap,
+	VmProtect,
 	VmUnmap,
 	ClockGet,
 	GetPid,
@@ -30,7 +31,11 @@ struct CreeperOsSysdepTags :
 	Access,
 	Openat,
 	Mkdirat,
-	Unlinkat
+	Unlinkat,
+	Dup,Dup2,
+	Fork,
+	Execve,
+	Uname
 {};
 
 template<typename Tag>
