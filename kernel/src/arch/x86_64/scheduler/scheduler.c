@@ -22,10 +22,14 @@
 
 
 
+
 HLIST_HEAD(_scheduler_process_list_head);
 
 uint16_t process_list_depth = 1;
 linked_pcb* _scheduler_current_process = 0;
+
+pcb_t* current_process;
+tcb_t* current_thread;
 
 #define _PID_BITMAP_SIZE (MAX_PID / 64)
 
@@ -200,7 +204,23 @@ int kill_ktask(linked_pcb* pcb) {
 }
 
 int kill_us_task(linked_pcb* pcb) {
-    if (!pcb) return -1;
+    if (!pcb) return -1;typedef struct pcb {
+        pid_t pid;
+        char* name;
+    
+        physptr_t cr3;
+    
+        heap_t heap;
+    
+        uintptr_t opened_file_table;
+        struct inode* cwd_i;
+    
+        kuid_t uid;
+        kgid_t gid;
+    
+        struct hlist_head threads;
+    
+    } pcb_t;
 
     Sys_log("user task %u (%s) exited with code:%d\n",
             pcb->pid, pcb->name, pcb->exit_code);
@@ -284,7 +304,7 @@ int scheduler_init() {
 
     enable_scheduler();
 // #fix teh damn reaper killing himself since ktask are shit now smh
-    ktask_start(reaper_ktask, "reaper");
+    // ktask_start(reaper_ktask, "reaper");
 
     Sys_Success("Scheduler Inited\n");
     return 0;
@@ -550,7 +570,8 @@ linked_pcb* us_task_start(void* entry, char* name, physptr_t page_dir,
     memset(res->fp_state, 0, sizeof(res->fp_state));// to not blow up once switching
     *(uint32_t*)(res->fp_state + 24) = 0x1F80; // MXCSR def
 
-    res->state = PCB_STATE_RUNNING;
+    
+
     Sys_Success("task '%s': created sucesssfully..?\n", name);
     return res;
 }

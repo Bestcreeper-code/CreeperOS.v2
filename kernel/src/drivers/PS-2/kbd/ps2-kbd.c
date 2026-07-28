@@ -8,7 +8,10 @@
 #include "interrupts/interrupts.h"
 #include "memops.h"
 #include "drivers/drivers.h"
+#include "memory/memory.h"
+#include "memory/pmm.h"
 #include "scheduler/scheduler.h"
+#include "string/format.h"
 #include "vfs/vfs.h"
 #include "vfs/fs.h"
 
@@ -220,6 +223,13 @@ void ps2_keyboard_handler(void* frame) {
 
     if(ch=='l') _log_all_processes();
     if(ch=='t') fs_tree(root_dentry, 0);
+    if(ch=='m') {
+        char buff[100];
+        byte_nb_simplify(pmm_get_total_pages() - pmm_get_free_pages(), buff, 4);
+        Sys_log_NoPos(ESC_BG_YELLOW"Ram: %s", buff);
+        byte_nb_simplify(pmm_get_total_pages(), buff, 4);
+        Sys_log_NoPos("/ %s"ESC_RESET"\n", buff);
+    }
     _current_eoi((uint8_t)HARDCODED_PS2_KBD_INTERRUPT_VECTOR_INDEX);
 }
 

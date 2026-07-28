@@ -1,6 +1,13 @@
 #pragma once
+
 #include <stdint.h>
 
+
+
+typedef struct {
+	uint64_t tv_sec;
+	uint64_t tv_nsec;
+} timespec;
 
 
 uint64_t timer_get_ms();

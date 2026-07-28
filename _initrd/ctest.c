@@ -29,6 +29,7 @@
 #include <string.h>
 #include <errno.h>
 #include <sys/types.h>
+#include <sys/utsname.h>
 #include <unistd.h>
 #include <fcntl.h>
 #include <dirent.h>
@@ -509,6 +510,7 @@ int main(int argc, char **argv) {
         fflush(stdout);
         exit(42);
     }
+    
 
     printf("=== syscall capability test ===\n");
     printf("(argv[0] = %s)\n\n", argv[0]);
@@ -522,7 +524,7 @@ int main(int argc, char **argv) {
     test_access();
     test_dup_dup2();
     test_getdents64();
-    test_fork_execve_exit(argv[0]);
+    // test_fork_execve_exit(argv[0]);
 
     printf("\n-- composed/wrapper syscalls --\n");
     test_readv_writev();

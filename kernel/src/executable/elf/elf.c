@@ -175,7 +175,10 @@ pid_t load_elf_from_vfs(const char* vfs_path, char** argv, char** envp)
         argv,
         envp
     );
+    pcb->cwd_i = dent->parent->inode;
 
+    
+    pcb->state = PCB_STATE_RUNNING;
     RET_IF(!pcb, -E_NOMEM);
 
     return pcb->pid;

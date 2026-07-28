@@ -35,6 +35,7 @@ typedef uintptr_t page_index;
 #define ADDR_TO_PAGE(addr) ((page_index)((addr) / PAGE_SIZE_4K))
 #define PAGE_TO_ADDR(pg)   ((uintptr_t)(pg) * PAGE_SIZE_4K)
 
+#define ROUND_TO_PAGE_DOWN(size)  (page_index)((size) & ~(PAGE_SIZE_4K-1))
 #define ROUND_TO_PAGE_UP(size)  ((page_index)((size) / PAGE_SIZE_4K)+1)
 
 extern uintptr_t kernel_pagedir_phys;
@@ -51,6 +52,13 @@ typedef struct vma_region {
 
 void hhdm_init();
 
+
+
+
+
+
+
+
 void map_4k(uint64_t *pml4, uintptr_t va, uintptr_t pa, uint64_t flags);
 void map_2m(uint64_t *pml4, uintptr_t va, uintptr_t pa, uint64_t flags);
 void map_1g(uint64_t *pml4, uintptr_t va, uintptr_t pa, uint64_t flags);
@@ -58,6 +66,15 @@ void map_1g(uint64_t *pml4, uintptr_t va, uintptr_t pa, uint64_t flags);
 void map_4k_pages(uint64_t* pml4, uintptr_t va, uintptr_t pa, size_t count, uint64_t flags);
 void map_2m_pages(uint64_t* pml4, uintptr_t va, uintptr_t pa, size_t count, uint64_t flags);
 void map_1g_pages(uint64_t* pml4, uintptr_t va, uintptr_t pa, size_t count, uint64_t flags);
+
+
+void unmap_4k(uint64_t *pml4, uintptr_t va);
+
+
+
+void unmap_4k_pages(uint64_t *pml4, uintptr_t va, size_t count);
+
+
 
 void vmm_map_page(uintptr_t vpage, uintptr_t ppage, uint64_t flags);
 void vmm_unmap_page(uintptr_t vpage);

@@ -6,7 +6,22 @@
 
 
 
-#define TIMER_ROLE_SYSTEM (1 << 0)
+typedef int clockid_t;
+
+#define CLOCK_REALTIME 0
+#define CLOCK_MONOTONIC 1
+#define CLOCK_PROCESS_CPUTIME_ID 2
+#define CLOCK_THREAD_CPUTIME_ID 3
+#define CLOCK_MONOTONIC_RAW 4
+#define CLOCK_REALTIME_COARSE 5
+#define CLOCK_MONOTONIC_COARSE 6
+#define CLOCK_BOOTTIME 7
+#define CLOCK_REALTIME_ALARM 8
+#define CLOCK_BOOTTIME_ALARM 9
+#define CLOCK_TAI 11
+
+
+#define TIMER_ROLE_SYSTEM_TIME (1 << 0)
 #define TIMER_ROLE_SLEEP (1 << 1)
 #define TIMER_ROLE_SCHED (1 << 2)  
 

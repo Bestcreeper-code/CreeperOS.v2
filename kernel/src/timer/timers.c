@@ -50,7 +50,7 @@ timer_registery_id timer_register(timer_dev* dev, uint32_t roles, int priority) 
     uint8_t idx = devices_by_type_count[type]++;
     devices_by_type[type][idx] = dev;
 
-    if (roles & TIMER_ROLE_SYSTEM) try_promote(&slot_system_time, dev, priority, "system");
+    if (roles & TIMER_ROLE_SYSTEM_TIME) try_promote(&slot_system_time, dev, priority, "system");
 
     if (roles & TIMER_ROLE_SLEEP) try_promote(&slot_sleep, dev, priority, "sleep");
 

@@ -11,13 +11,13 @@ extern volatile uint64_t ticks_us;
 
 uint64_t timer_get_ms() {
     timer_dev *sys = timer_get_system_time_dev();
-    if (sys) return sys->gettime_us(sys) / 1000000ULL;
+    if (sys) return sys->gettime_us(sys) / 1000ULL;
     return ticks_ms;
 }
 
 uint64_t timer_get_us() {
     timer_dev *sys = timer_get_system_time_dev();
-    if (sys) return sys->gettime_us(sys) / 1000ULL;
+    if (sys) return sys->gettime_us(sys);
     return ticks_us;
 }
 

@@ -12,19 +12,24 @@
 #include "cpu/idt.h"
 #include "memory/memory.h"
 #include "memory/pmm.h"
+#include "rtc/rtc.h"
+#include "cpu/tsc_clk/tsc_clk.h"
 #include <stdint.h>
 
 
 GCC_ATTR((noreturn))
 void arch_init(){
     Sys_log("Entering arch init\n");
+    tsc_clk_init();
+    rtc_init();
+    
     register_cpu_features();
     
     init_gdt();
     idt_init();
     
     register_cpu_exceptions();
-    
+
     fpu_init();
     
     //mem

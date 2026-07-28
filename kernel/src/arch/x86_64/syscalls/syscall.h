@@ -4,8 +4,56 @@
 #include "defines/compiler_defs.h"
 #include "defines/types.h"
 #include "scheduler/scheduler.h"
+#include "timer/timers.h"
+#include "timer/time.h"
 
 
+#define SYS_READ 0
+#define SYS_WRITE 1
+#define SYS_OPEN 2
+#define SYS_CLOSE 3
+
+
+#define SYS_LSEEK 8
+#define SYS_MMAP 9
+#define SYS_MPROTECT 10
+#define SYS_MUNMAP 11
+#define SYS_BRK 12
+
+#define SYS_ACCESS 21
+
+#define SYS_SCHED_YIELD 24
+
+#define SYS_DUP 32
+#define SYS_DUP2 33
+
+#define SYS_GETPID 39
+
+#define SYS_FORK 57
+
+#define SYS_EXECVE 59
+#define SYS_EXIT 60
+
+#define SYS_UNAME 63
+
+#define SYS_GETCWD 79
+#define SYS_CHDIR 80
+
+#define SYS_MKDIR 83
+#define SYS_RMDIR 84
+#define SYS_CREATE 85
+
+#define SYS_UNLINK 87
+
+#define SYS_ARCH_PRCTL 158
+
+#define SYS_GETDENTS64 217
+#define SYS_CLOCK_GETTIME 228
+
+#define SYS_OPENAT 257
+#define SYS_MKDIRAT 258
+
+#define SYS_UNLINKAT 263
 
 ssize_t syscall_handler(
     register_t rax, //syscall number
@@ -50,6 +98,20 @@ loff_t sys_lseek(
     unsigned int origin
 );
 
+#define PROT_NONE  0x00
+#define PROT_READ  0x01
+#define PROT_WRITE 0x02
+#define PROT_EXEC  0x04
+int sys_mprotect(
+    uintptr_t start,
+    size_t len,
+    unsigned long prot
+);
+
+int sys_munmap(
+    uintptr_t addr,
+    size_t len
+);
 
 uintptr_t sys_brk(
     size_t brk
@@ -73,6 +135,17 @@ int sys_execve(
 void sys_exit(
     int code,
     register_t rsp
+);
+
+struct utsname {
+    char sysname[65];
+    char nodename[65];
+    char release[65];
+    char version[65];
+    char machine[65];
+};
+int sys_uname(
+    __user struct utsname* ptr 
 );
 
 char* sys_getcwd(
@@ -127,6 +200,11 @@ ssize_t sys_getdents64(
     unsigned int fd,
     __user void* dirp,
     size_t count
+);
+
+int sys_clock_gettime(
+    const clockid_t which_clock,
+    __user timespec* tim_sp
 );
 
 int sys_openat(

@@ -35,6 +35,7 @@
 
 
 typedef short pid_t;
+typedef short tid_t;
 
 typedef struct linked_pcb_t {
     short pid;
@@ -77,6 +78,44 @@ typedef struct __attribute__((packed)) {
     uint64_t ss;
 } process_stack_frame;
 
+typedef struct pcb {
+    pid_t pid;
+    char* name;
+
+    physptr_t cr3;
+
+    heap_t heap;
+
+    uintptr_t opened_file_table;
+    struct inode* cwd_i;
+
+    kuid_t uid;
+    kgid_t gid;
+
+    struct hlist_head threads;
+
+} pcb_t;
+
+typedef struct tcb {
+
+    tid_t tid;
+    uint16_t state;
+
+    pcb_t* process;
+
+    uint64_t k_rsp;
+
+    stack_t kernel_stack;
+    stack_t user_stack;
+
+    uintptr_t fs_base;
+    uintptr_t gs_base;
+
+    uint8_t fp_state[512];
+
+    struct hlist_node list_node;
+
+} tcb_t;
 
 
 extern linked_pcb* _scheduler_current_process;

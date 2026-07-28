@@ -13,8 +13,8 @@ _kernel_yield:
 
     push KERNEL_SS              ; ss
     push rcx                    ; rsp
-    pushfq                       ; rflags — captured while IF is still genuinely enabled
-    cli                           ; NOW block interrupts for the rest of the build + switch
+    pushfq                       ; rflags(+if)
+    cli
     push KERNEL_CS              ; cs
     push rax                    ; rip
 

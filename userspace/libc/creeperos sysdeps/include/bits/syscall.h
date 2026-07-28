@@ -19,7 +19,7 @@ __sc_word_t __do_syscall6(long, __sc_word_t, __sc_word_t, __sc_word_t, __sc_word
 		__sc_word_t, __sc_word_t);
 __sc_word_t __do_syscall7(long, __sc_word_t, __sc_word_t, __sc_word_t, __sc_word_t,
 		__sc_word_t, __sc_word_t, __sc_word_t);
-long __do_syscall_ret(unsigned long);
+// long (unsigned long);
 
 #ifdef __cplusplus
 extern "C++" {
@@ -28,35 +28,35 @@ extern "C++" {
  * a name collision e.g foo.syscall() or foo::syscall.
  */
 inline long syscall(long n) {
-	return __do_syscall_ret(__do_syscall0(n));
+	return (__do_syscall0(n));
 }
 template<typename Arg0>
 long syscall(long n, Arg0 a0) {
-	return __do_syscall_ret(__do_syscall1(n, (long)a0));
+	return (__do_syscall1(n, (long)a0));
 }
 template<typename Arg0, typename Arg1>
 long syscall(long n, Arg0 a0, Arg1 a1) {
-	return __do_syscall_ret(__do_syscall2(n, (long)a0, (long)a1));
+	return (__do_syscall2(n, (long)a0, (long)a1));
 }
 template<typename Arg0, typename Arg1, typename Arg2>
 long syscall(long n, Arg0 a0, Arg1 a1, Arg2 a2) {
-	return __do_syscall_ret(__do_syscall3(n, (long)a0, (long)a1, (long)a2));
+	return (__do_syscall3(n, (long)a0, (long)a1, (long)a2));
 }
 template<typename Arg0, typename Arg1, typename Arg2, typename Arg3>
 long syscall(long n, Arg0 a0, Arg1 a1, Arg2 a2, Arg3 a3) {
-	return __do_syscall_ret(__do_syscall4(n, (long)a0, (long)a1, (long)a2, (long)a3));
+	return (__do_syscall4(n, (long)a0, (long)a1, (long)a2, (long)a3));
 }
 template<typename Arg0, typename Arg1, typename Arg2, typename Arg3, typename Arg4>
 long syscall(long n, Arg0 a0, Arg1 a1, Arg2 a2, Arg3 a3, Arg4 a4) {
-	return __do_syscall_ret(__do_syscall5(n, (long)a0, (long)a1, (long)a2, (long)a3, (long)a4));
+	return (__do_syscall5(n, (long)a0, (long)a1, (long)a2, (long)a3, (long)a4));
 }
 template<typename Arg0, typename Arg1, typename Arg2, typename Arg3, typename Arg4, typename Arg5>
 long syscall(long n, Arg0 a0, Arg1 a1, Arg2 a2, Arg3 a3, Arg4 a4, Arg5 a5) {
-	return __do_syscall_ret(__do_syscall6(n, (long)a0, (long)a1, (long)a2, (long)a3, (long)a4, (long)a5));
+	return (__do_syscall6(n, (long)a0, (long)a1, (long)a2, (long)a3, (long)a4, (long)a5));
 }
 template<typename Arg0, typename Arg1, typename Arg2, typename Arg3, typename Arg4, typename Arg5, typename Arg6>
 long syscall(long n, Arg0 a0, Arg1 a1, Arg2 a2, Arg3 a3, Arg4 a4, Arg5 a5, Arg6 a6) {
-	return __do_syscall_ret(__do_syscall7(n, (long)a0, (long)a1, (long)a2, (long)a3, (long)a4, (long)a5, (long)a6));
+	return (__do_syscall7(n, (long)a0, (long)a1, (long)a2, (long)a3, (long)a4, (long)a5, (long)a6));
 }
 
 } /* extern C++ */
@@ -87,7 +87,7 @@ long syscall(long n, Arg0 a0, Arg1 a1, Arg2 a2, Arg3 a3, Arg4 a4, Arg5 a5, Arg6 
 #define __SYSCALL_CONCAT(a,b) __SYSCALL_CONCAT_X(a,b)
 #define __SYSCALL_DISP(b,...) __SYSCALL_CONCAT(b,__SYSCALL_NARGS(__VA_ARGS__))(__VA_ARGS__)
 #define __syscall(...) __SYSCALL_DISP(__syscall,__VA_ARGS__)
-#define syscall(...) __do_syscall_ret(__syscall(__VA_ARGS__))
+#define syscall(...) (__syscall(__VA_ARGS__))
 
 #pragma GCC diagnostic pop
 

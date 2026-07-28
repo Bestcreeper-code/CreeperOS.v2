@@ -14,6 +14,6 @@
 #define FORK_DEBUG 0
 #define EXEC_DEBUG 1
 
-#define SYSCALL_DEBUG 0//1+ = raw args,2= specific syscall logs
+#define SYSCALL_DEBUG 1//1+ = raw args,2= specific syscall logs
 
 #define PIC_DISABLE_APIC 0

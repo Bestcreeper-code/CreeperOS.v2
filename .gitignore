@@ -17,7 +17,10 @@ edk2-ovmf-bins
 limine-binary
 *.cache
 *.o
+*.a
+*.tar
 *.elf
+*.tar
 *.ansi
 _initrd/usr/include
 _initrd/usr/lib

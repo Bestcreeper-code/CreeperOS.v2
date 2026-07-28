@@ -1,5 +1,6 @@
 #pragma once
 
+#include "mlibc/sysdep-tags.hpp"
 #include <mlibc/sysdep-signatures.hpp>
 
 namespace mlibc {
@@ -21,7 +22,15 @@ struct CreeperOsSysdepTags :
 	Open,
 	VmMap,
 	VmUnmap,
-	ClockGet
+	ClockGet,
+	GetPid,
+	GetCwd,
+	Rmdir,
+	Mkdir,
+	Access,
+	Openat,
+	Mkdirat,
+	Unlinkat
 {};
 
 template<typename Tag>

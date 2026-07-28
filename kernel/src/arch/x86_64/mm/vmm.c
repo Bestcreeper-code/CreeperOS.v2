@@ -68,6 +68,21 @@ static inline int cpu_has_1gb_pages() {
     return (edx >> 26) & 1;
 }
 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 static uint64_t* table_get_or_create(uint64_t* table, size_t idx, uint64_t flags) {
     uint64_t perm_bits = flags & (PTE_WRITABLE | PTE_USER | PTE_LOCAL_OWNED);
 
@@ -141,6 +156,102 @@ void map_1g_pages(uint64_t* pml4, uintptr_t va, uintptr_t pa, size_t count, uint
     }
     vmm_lock_release();
 }
+
+
+
+
+
+
+
+
+
+
+static bool table_empty(uint64_t *table)
+{
+    for (size_t i = 0; i < 512; i++) {
+        if (table[i] & PTE_PRESENT)
+            return false;
+    }
+
+    return true;
+}
+
+
+static void unmap_4k_nolock(uint64_t *pml4, uintptr_t va, bool free_phys)
+{
+    uint64_t *pml4e = &pml4[PML4_INDEX(va)];
+
+    if (!(*pml4e & PTE_PRESENT))
+        return;
+
+    uint64_t *pdpt = PHYS_2_HHDM(*pml4e & PTE_ADDR_MASK);
+    uint64_t *pdpte = &pdpt[PDPT_INDEX(va)];
+
+    if (!(*pdpte & PTE_PRESENT))
+        return;
+
+    uint64_t *pd = PHYS_2_HHDM(*pdpte & PTE_ADDR_MASK);
+    uint64_t *pde = &pd[PD_INDEX(va)];
+
+    if (!(*pde & PTE_PRESENT))
+        return;
+
+    
+    if (*pde & PTE_HUGE)
+        return;
+
+    uint64_t *pt = PHYS_2_HHDM(*pde & PTE_ADDR_MASK);
+    uint64_t *pte = &pt[PT_INDEX(va)];
+
+    if (!(*pte & PTE_PRESENT))
+        return;
+
+
+    uintptr_t pa = *pte & PTE_ADDR_MASK;
+    bool owned = *pte & PTE_LOCAL_OWNED;
+
+
+    
+    *pte = 0;
+
+    asm volatile("invlpg (%0)" :: "r"(va) : "memory");
+
+
+    if (free_phys && owned)
+        pmm_free((physptr_t)pa);
+}
+
+void unmap_4k(uint64_t *pml4, uintptr_t va)
+{
+    vmm_lock_acquire();
+    unmap_4k_nolock(pml4, va, true);
+    vmm_lock_release();
+}
+
+void unmap_4k_pages(uint64_t *pml4, uintptr_t va, size_t count)
+{
+    vmm_lock_acquire();
+
+    for (size_t i = 0; i < count; i++) {
+        unmap_4k_nolock(
+            pml4,
+            va + i * PAGE_SIZE_4K,
+            true
+        );
+    }
+
+    vmm_lock_release();
+}
+
+
+
+
+
+
+
+
+
+
 
 static void hhdm_check_coverage() {
     struct limine_memmap_response* mm = memmap_request.response;
@@ -238,63 +349,50 @@ uintptr_t vmm_virt_to_phys(uintptr_t vaddr) {
     return result;
 }
 
-uintptr_t page_dir_virt_to_phys(uint64_t* pml4, uintptr_t vaddr) {
-    vmm_lock_acquire();
+uintptr_t page_dir_virt_to_phys(uint64_t* pml4, uintptr_t vaddr)
+{
+    Sys_log("walk vaddr=%llx pml4=%llx\n", vaddr, (uint64_t)pml4);
 
-    uint64_t pdpt_e = pml4[PML4_INDEX(vaddr)];
-    if (!(pdpt_e & PTE_PRESENT)) {
-        vmm_lock_release();
+    uint64_t pml4_e = pml4[PML4_INDEX(vaddr)];
+    Sys_log("pml4[%llx]=%llx\n", PML4_INDEX(vaddr), pml4_e);
+
+    if (!(pml4_e & PTE_PRESENT))
         return UINTPTR_MAX;
-    }
 
-    uint64_t* pdpt = (uint64_t*)PHYS_2_HHDM(pdpt_e & PTE_ADDR_MASK);
+    uint64_t* pdpt = (uint64_t*)PHYS_2_HHDM(pml4_e & PTE_ADDR_MASK);
 
-    uint64_t pd_e = pdpt[PDPT_INDEX(vaddr)];
-    if (!(pd_e & PTE_PRESENT)) {
-        vmm_lock_release();
+    uint64_t pdpt_e = pdpt[PDPT_INDEX(vaddr)];
+    Sys_log("pdpt[%llx]=%llx\n", PDPT_INDEX(vaddr), pdpt_e);
+
+    if (!(pdpt_e & PTE_PRESENT))
         return UINTPTR_MAX;
-    }
 
-    if (pd_e & PTE_HUGE) {
-        uintptr_t result =
-            (pd_e & PTE_ADDR_MASK) |
-            (vaddr & (PAGE_SIZE_1G - 1));
+    if (pdpt_e & PTE_HUGE)
+        return (pdpt_e & PTE_ADDR_MASK) |
+               (vaddr & (PAGE_SIZE_1G - 1));
 
-        vmm_lock_release();
-        return result;
-    }
+    uint64_t* pd = (uint64_t*)PHYS_2_HHDM(pdpt_e & PTE_ADDR_MASK);
 
-    uint64_t* pd = (uint64_t*)PHYS_2_HHDM(pd_e & PTE_ADDR_MASK);
+    uint64_t pd_e = pd[PD_INDEX(vaddr)];
+    Sys_log("pd[%llx]=%llx\n", PD_INDEX(vaddr), pd_e);
 
-    uint64_t pt_e = pd[PD_INDEX(vaddr)];
-    if (!(pt_e & PTE_PRESENT)) {
-        vmm_lock_release();
+    if (!(pd_e & PTE_PRESENT))
         return UINTPTR_MAX;
-    }
 
-    if (pt_e & PTE_HUGE) {
-        uintptr_t result =
-            (pt_e & PTE_ADDR_MASK) |
-            (vaddr & (PAGE_SIZE_2M - 1));
+    if (pd_e & PTE_HUGE)
+        return (pd_e & PTE_ADDR_MASK) |
+               (vaddr & (PAGE_SIZE_2M - 1));
 
-        vmm_lock_release();
-        return result;
-    }
+    uint64_t* pt = (uint64_t*)PHYS_2_HHDM(pd_e & PTE_ADDR_MASK);
 
-    uint64_t* pt = (uint64_t*)PHYS_2_HHDM(pt_e & PTE_ADDR_MASK);
+    uint64_t pt_e = pt[PT_INDEX(vaddr)];
+    Sys_log("pt[%llx]=%llx\n", PT_INDEX(vaddr), pt_e);
 
-    uint64_t page_e = pt[PT_INDEX(vaddr)];
-    if (!(page_e & PTE_PRESENT)) {
-        vmm_lock_release();
+    if (!(pt_e & PTE_PRESENT))
         return UINTPTR_MAX;
-    }
 
-    uintptr_t result =
-        (page_e & PTE_ADDR_MASK) |
-        (vaddr & (PAGE_SIZE_4K - 1));
-
-    vmm_lock_release();
-    return result;
+    return (pt_e & PTE_ADDR_MASK) |
+           (vaddr & (PAGE_SIZE_4K - 1));
 }
 
 static uint64_t* get_current_pml4() {

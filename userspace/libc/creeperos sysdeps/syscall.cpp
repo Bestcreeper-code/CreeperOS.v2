@@ -3,6 +3,11 @@
 
 using sc_word_t = __sc_word_t;
 
+
+extern "C" long __do_syscall_ret(unsigned long ret) {
+	return ret;
+}
+extern "C"
 sc_word_t __do_syscall0(long sc) {
 	sc_word_t ret;
 	asm volatile ("syscall" : "=a"(ret)
@@ -10,7 +15,7 @@ sc_word_t __do_syscall0(long sc) {
 			: "rcx", "r11", "memory");
 	return ret;
 }
-
+extern "C"
 sc_word_t __do_syscall1(long sc,
 		sc_word_t arg1) {
 	sc_word_t ret;
@@ -19,7 +24,7 @@ sc_word_t __do_syscall1(long sc,
 			: "rcx", "r11", "memory");
 	return ret;
 }
-
+extern "C"
 sc_word_t __do_syscall2(long sc,
 		sc_word_t arg1, sc_word_t arg2) {
 	sc_word_t ret;
@@ -28,7 +33,7 @@ sc_word_t __do_syscall2(long sc,
 			: "rcx", "r11", "memory");
 	return ret;
 }
-
+extern "C"
 sc_word_t __do_syscall3(long sc,
 		sc_word_t arg1, sc_word_t arg2, sc_word_t arg3) {
 	sc_word_t ret;
@@ -37,7 +42,7 @@ sc_word_t __do_syscall3(long sc,
 			: "rcx", "r11", "memory");
 	return ret;
 }
-
+extern "C"
 sc_word_t __do_syscall4(long sc,
 		sc_word_t arg1, sc_word_t arg2, sc_word_t arg3,
 		sc_word_t arg4) {
@@ -49,7 +54,7 @@ sc_word_t __do_syscall4(long sc,
 			: "rcx", "r11", "memory");
 	return ret;
 }
-
+extern "C"
 sc_word_t __do_syscall5(long sc,
 		sc_word_t arg1, sc_word_t arg2, sc_word_t arg3,
 		sc_word_t arg4, sc_word_t arg5) {
@@ -62,7 +67,7 @@ sc_word_t __do_syscall5(long sc,
 			: "rcx", "r11", "memory");
 	return ret;
 }
-
+extern "C"
 sc_word_t __do_syscall6(long sc,
 		sc_word_t arg1, sc_word_t arg2, sc_word_t arg3,
 		sc_word_t arg4, sc_word_t arg5, sc_word_t arg6) {

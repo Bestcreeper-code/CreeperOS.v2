@@ -1,5 +1,6 @@
 #include "arch/vmm.h"
 #include "asm/asm.h"
+#include "build.h"
 #include "config.h"
 #include "cpu/gdt.h"
 #include "debug/Logger.h"
@@ -13,14 +14,19 @@
 #include "memory/pmm.h"
 #include "mm/vmm_arch.h"
 
+#include "rtc/rtc.h"
 #include "scheduler/scheduler.h"
 #include "string/string.h"
 
+#include "timer/time.h"
+#include "timer/timers.h"
 #include "syscall.h"
 #include "vfs/fs.h"
 #include "vfs/vfs.h"
+
 #include <stddef.h>
 #include <stdint.h>
+
 
 #define MSR_STAR            0xC0000081
 #define MSR_LSTAR           0xC0000082
@@ -131,44 +137,50 @@ ssize_t syscall_handler(
 
     switch (rax) {
 
-        case 0: // sys_read
+        case SYS_READ: // sys_read
             return sys_read(rdi, (__user void*)rsi, rdx);
 
-        case 1: // sys_write
+        case SYS_WRITE: // sys_write
             return sys_write(rdi, (const __user void*)rsi, rdx);
 
-        case 2: // sys_open
+        case SYS_OPEN: // sys_open
             return sys_open((const __user char*)rdi, rsi, rdx);
 
-        case 3: // sys_close
+        case SYS_CLOSE: // sys_close
             return sys_close(rdi);
 
-        case 8:
+        case SYS_LSEEK:
             return sys_lseek(rdi, rsi, rdx);
         
-        case 12:
+        case SYS_MPROTECT:
+            return sys_mprotect(rdi, rsi, rdx);
+        
+        case SYS_MUNMAP:
+            return sys_munmap(rdi, rsi);
+
+        case SYS_BRK:
             return sys_brk(rdi);
         
-        case 21: // sys_access
+        case SYS_ACCESS: // sys_access
             return sys_access((const __user char*)rdi, rsi);
 
-        case 24: // sys_sched_yield
+        case SYS_SCHED_YIELD: // sys_sched_yield
             // yield_core(rsp);
             return 0;
 
-        case 32: // sys_dup
+        case SYS_DUP: // sys_dup
             return sys_dup(rdi);
 
-        case 33: // sys_dup2
+        case SYS_DUP2: // sys_dup2
             return sys_dup2(rdi, rsi);
 
-        case 39:
+        case SYS_GETPID:
             return sys_getpid();
             
-        case 57:
+        case SYS_FORK:
             return sys_fork(rsp);
             
-        case 59:
+        case SYS_EXECVE:
             return sys_execve(
                 (const __user char* )rdi,
                 (const __user char**)rsi,
@@ -176,42 +188,48 @@ ssize_t syscall_handler(
                 rsp
             );
             
-        case 60: // sys_exit
+        case SYS_EXIT: // sys_exit
             sys_exit(rdi, rsp);
             //i swear... if that returns there is a big issue
             return 0;
             
-        case 79:
+        case SYS_UNAME:
+            return sys_uname((__user struct utsname*)rdi);
+
+        case SYS_GETCWD:
             return (ssize_t)sys_getcwd((__user char*)rdi, rsi);
 
-        case 80: // sys_chdir
+        case SYS_CHDIR: // sys_chdir
             return sys_chdir((const __user char*)rdi);
             
-        case 83: // sys_mkdir
+        case SYS_MKDIR: // sys_mkdir
             return sys_mkdir((const __user char*)rdi, rsi);
 
-        case 84: // sys_rmdir
+        case SYS_RMDIR: // sys_rmdir
             return sys_rmdir((const __user char*)rdi);
 
-        case 85: // sys_creat
+        case SYS_CREATE: // sys_creat
             return sys_create((const __user char*)rdi, rsi);
 
-        case 87: // sys_unlink
+        case SYS_UNLINK: // sys_unlink
             return sys_unlink((const __user char*)rdi);
-        case 158:
+        
+        case SYS_ARCH_PRCTL:
             return sys_arch_prctl(rdi, (unsigned long*) rsi);
 
-        case 217: // sys_getdents64
+        case SYS_GETDENTS64: // sys_getdents64
             return sys_getdents64(rdi, (__user void*)rsi, rdx);
         
-            
-        case 257: // sys_openat
+        case SYS_CLOCK_GETTIME:
+            return sys_clock_gettime(rdi, (__user timespec*)rsi);
+
+        case SYS_OPENAT: // sys_openat
             return sys_openat(rdi, (const __user char*)rsi, rdx, r10);
 
-        case 258: // sys_mkdirat
+        case SYS_MKDIRAT: // sys_mkdirat
             return sys_mkdirat(rdi, (const __user char*)rsi, rdx);
 
-        case 263: // sys_unlinkat
+        case SYS_UNLINKAT: // sys_unlinkat
             return sys_unlinkat(rdi, (const __user char*)rsi, rdx);
         
         default:
@@ -465,6 +483,81 @@ loff_t sys_lseek(
 }
 
 
+void* sys_mmap(
+    uintptr_t addr,
+    size_t len,
+    unsigned long prot,
+    unsigned long flags,
+    unsigned long fd,
+    loff_t off
+) {
+
+}
+
+
+int sys_mprotect(
+    uintptr_t start,
+    size_t len,
+    unsigned long prot
+) {
+    uint64_t flags = PTE_NX | PTE_USER;
+
+    if (prot == PROT_NONE)
+        flags &= ~PTE_USER;
+
+    if (prot & PROT_WRITE)
+        flags |= PTE_WRITABLE;
+
+    if (prot & PROT_EXEC)
+        flags &= ~PTE_NX;
+
+    // PROT_READ is implicit 
+
+    uintptr_t end = ROUND_TO_PAGE_UP(start + len);
+
+    for (uintptr_t addr = ROUND_TO_PAGE_DOWN(start);
+         addr < end;
+         addr += PAGE_SIZE_4K)
+    {
+        uint64_t* pml4 = (uint64_t*)PHYS_2_HHDM(
+            _scheduler_current_process->cr3 & PTE_ADDR_MASK
+        );
+        
+        uintptr_t phys = page_dir_virt_to_phys(pml4, addr);
+        if (!phys || phys == UINTPTR_MAX)
+            continue;
+        
+
+        uint64_t* pte = (uint64_t*)phys;
+
+        Sys_log("%llx\n", _scheduler_current_process->cr3);
+        Sys_log("%llx\n", pte);
+        *pte &= ~(PTE_USER | PTE_WRITABLE | PTE_NX);
+        *pte |= flags;
+
+        invlpg(addr);
+    }
+
+    return 0;
+}
+
+
+int sys_munmap(
+    uintptr_t addr,
+    size_t len
+) {
+    uint64_t *pml4 = PHYS_2_HHDM(_scheduler_current_process->cr3);
+
+    uintptr_t start = addr & ~(PAGE_SIZE_4K - 1);
+    uintptr_t end = (addr + len + PAGE_SIZE_4K - 1) & ~(PAGE_SIZE_4K - 1);
+
+    unmap_4k_pages(
+        pml4,
+        start,
+        (end - start) / PAGE_SIZE_4K
+    );
+}
+
 
 uintptr_t sys_brk(size_t brk) {
     heap_t *heap = &_scheduler_current_process->heap;
@@ -558,6 +651,25 @@ void sys_exit(
 
     yield_core(rsp);
 }
+
+
+int sys_uname(
+    __user struct utsname* ptr
+) {
+    RET_IF(!ptr, -E_INVAL);
+    const static struct utsname machine_kernel_utsname = {
+        .sysname = KERNEL_NAME,
+        .machine = MACHINE_ARCH,
+        .release = KERNEL_RELEASE,
+        .version = KERNEL_VERSION,
+        .nodename = "pc-unimpl"
+    };
+
+    copy_to_user(ptr, &machine_kernel_utsname, sizeof(machine_kernel_utsname));
+    return 0;
+}
+
+
 
 
 char* sys_getcwd(
@@ -916,9 +1028,40 @@ ssize_t sys_getdents64(
 }
 
 
+int sys_clock_gettime(
+    const clockid_t which_clock,
+    __user timespec* tim_sp
+) {
+    timespec ts;
 
+    switch (which_clock) {
+        case CLOCK_BOOTTIME:
+        case CLOCK_MONOTONIC:
+        case CLOCK_MONOTONIC_COARSE:
+        case CLOCK_MONOTONIC_RAW: {
+            uint64_t us = timer_get_us();
 
+            ts.tv_sec  = us / 1000000ULL;
+            ts.tv_nsec = (us % 1000000ULL) * 1000ULL;
+            break;
+        }
 
+        case CLOCK_REALTIME:
+        case CLOCK_REALTIME_COARSE: {
+            uint64_t sec = get_unixtime();
+
+            ts.tv_sec  = sec;
+            ts.tv_nsec = 0;
+            break;
+        }
+
+        default:
+            return -E_INVAL;
+    }
+
+    copy_to_user(tim_sp, &ts, sizeof(ts));
+    return 0;
+}
 
 int sys_openat(
     int dfd,
@@ -1046,4 +1189,5 @@ int sys_unlinkat(
     kfree(parent_path);
     kfree(name);
     return ret;
+
 }
