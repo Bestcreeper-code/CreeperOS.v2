@@ -22,5 +22,6 @@ limine-binary
 *.elf
 *.tar
 *.ansi
+*.log
 _initrd/usr/include
 _initrd/usr/lib
