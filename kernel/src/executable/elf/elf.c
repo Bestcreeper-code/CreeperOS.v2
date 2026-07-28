@@ -144,7 +144,7 @@ pid_t load_elf_from_vfs(const char* vfs_path, char** argv, char** envp)
                   (ph->p_flags & PF_X) ? 'X' : '-',
                   seg_pages, (void*)seg_phys);
 #endif
-
+ 
         uint64_t map_flags = PTE_PRESENT | PTE_USER | PTE_LOCAL_OWNED;
 
         if (ph->p_flags & PF_W)
