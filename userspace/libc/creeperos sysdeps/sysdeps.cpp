@@ -1,3 +1,4 @@
+#include "mlibc/sysdeps.hpp"
 #include "abi-bits/clockid_t.h"
 #include "abi-bits/fcntl.h"
 #include "abi-bits/pid_t.h"
@@ -40,8 +41,9 @@
 
 #define SYS_EXECVE 59
 #define SYS_EXIT 60
+#define SYS_WAIT4 61
 
-#define SYS_UNAME 60
+#define SYS_UNAME 63
 
 #define SYS_GETCWD 79
 #define SYS_CHDIR 80
@@ -53,6 +55,8 @@
 #define SYS_UNLINK 87
 
 #define SYS_ARCH_PRCTL 158
+
+#define SYS_GETTID 186
 
 #define SYS_GETDENTS64 217
 #define SYS_CLOCK_GETTIME 228
@@ -214,7 +218,7 @@ int Sysdeps<ClockGet>::operator()(int clock, time_t* secs, long* nanos) {
 	printf("%lx   %lx \n",t.tv_sec, t.tv_nsec);
 	*secs = t.tv_sec;
 	printf("%lx   %lx \n",t.tv_sec, t.tv_nsec);
-	*nanos = t.tv_nsec;for(;;);
+	*nanos = t.tv_nsec;
 	return res;
 }
 
@@ -223,22 +227,23 @@ pid_t Sysdeps<GetPid>::operator()() {
 }
 
 int Sysdeps<GetCwd>::operator()(char *buffer, size_t size) {
-	short ret = syscall(SYS_GETCWD, buffer, size);
-	
-	return -ret;
+	long ret = syscall(SYS_GETCWD, buffer, size);   // pointer-width, not short
+
+	if (ret < 0) return -ret;
+	return 0;
 }
 
 int Sysdeps<Mkdir>::operator()(const char *path, mode_t mode) {
-	return syscall(SYS_MKDIR, path, mode);
+	return -syscall(SYS_MKDIR, path, mode);
 	
 }
 
 int Sysdeps<Rmdir>::operator()(const char* path) {
-	return syscall(SYS_RMDIR, path);
+	return -syscall(SYS_RMDIR, path);
 }
 
 int Sysdeps<Access>::operator()(const char *path, int mode) {
-	return syscall(SYS_ACCESS, path, mode);
+	return -syscall(SYS_ACCESS, path, mode);
 }
 
 int Sysdeps<Openat>::operator()(int dirfd, const char *path, int flags, mode_t mode, int *fd) {
@@ -252,11 +257,11 @@ int Sysdeps<Openat>::operator()(int dirfd, const char *path, int flags, mode_t m
 }
 
 int Sysdeps<Mkdirat>::operator()(int dirfd, const char *path, mode_t mode) {
-	return syscall(SYS_MKDIRAT, dirfd, path, mode);
+	return -syscall(SYS_MKDIRAT, dirfd, path, mode);
 }
 
 int Sysdeps<Unlinkat>::operator()(int dirfd, const char *path, int flags) {
-	return syscall(SYS_UNLINKAT, dirfd, path, flags);
+	return -syscall(SYS_UNLINKAT, dirfd, path, flags);
 }
 
 int Sysdeps<Dup>::operator()(int fd, int flags, int *newfd) {
@@ -273,7 +278,7 @@ int Sysdeps<Dup2>::operator()(int fd, int flags, int newfd) {
 
 	if(ret<0) return -ret;
 
-	return ret;
+	return 0;
 }
 
 int Sysdeps<Fork>::operator()(pid_t* child) {
@@ -281,7 +286,7 @@ int Sysdeps<Fork>::operator()(pid_t* child) {
 
 	if(ret<0) return -ret;
 	*child = ret;
-	return ret;
+	return 0;
 }
 
 int Sysdeps<Execve>::operator()(const char *path, char *const argv[], char *const envp[]) {
@@ -291,6 +296,26 @@ int Sysdeps<Execve>::operator()(const char *path, char *const argv[], char *cons
 int Sysdeps<Uname>::operator()(struct utsname* buf) {
 	return -syscall(SYS_UNAME, buf);
 	
+}
+
+int Sysdeps<Waitpid>::operator()(pid_t pid, int* status, int flags, struct rusage* ru, pid_t* ret_pid) {
+    long result = syscall(SYS_WAIT4, pid, status, flags, ru);
+
+    if (result < 0) {
+		*ret_pid = 22;
+        return -result;
+    }
+
+    if (ret_pid) *ret_pid = static_cast<pid_t>(result);
+    return 0;
+}
+
+pid_t Sysdeps<GetTid>::operator()() {
+	return (short)syscall(SYS_GETTID);
+}
+
+int Sysdeps<Chdir>::operator()(const char *path) {
+	return -syscall(SYS_CHDIR, path);
 }
 
 // int Sysdeps<Unlinkat>::operator()(int dirfd, const char *path, int flags) {

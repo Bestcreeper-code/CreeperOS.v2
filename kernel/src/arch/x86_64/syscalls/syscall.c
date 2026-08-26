@@ -1,3 +1,4 @@
+#include "arch/locks.h"
 #include "arch/vmm.h"
 #include "asm/asm.h"
 #include "build.h"
@@ -5,6 +6,7 @@
 #include "cpu/gdt.h"
 #include "debug/Logger.h"
 #include "defines/compiler_defs.h"
+#include "defines/container_of.h"
 #include "defines/err_codes.h"
 #include "defines/types.h"
 #include "drivers/drivers.h"
@@ -101,15 +103,15 @@ static struct inode* resolve_at(int dfd, const char* kpath)
         return path_resolve_start(kpath);
 
     if (dfd == AT_FDCWD)
-        return _scheduler_current_process->cwd_i;
+        return current_process->cwd_i;
 
     if (dfd < 0 || dfd >= DEFAULT_FILE_TABLE_ENTRIES)
         return NULL;
 
-    if (!_scheduler_current_process->opened_file_table)
+    if (!current_process->opened_file_table)
         return NULL;
 
-    file* table = (file*)_scheduler_current_process->opened_file_table;
+    file* table = (file*)current_process->opened_file_table;
 
     if (!table[dfd].f_inode)
         return NULL;
@@ -192,6 +194,8 @@ ssize_t syscall_handler(
             sys_exit(rdi, rsp);
             //i swear... if that returns there is a big issue
             return 0;
+        case SYS_WAIT4: // sys_wait4
+            return sys_wait4(rdi, (__user int*)rsi, rdx, (__user void*)r10, rsp);
             
         case SYS_UNAME:
             return sys_uname((__user struct utsname*)rdi);
@@ -216,6 +220,8 @@ ssize_t syscall_handler(
         
         case SYS_ARCH_PRCTL:
             return sys_arch_prctl(rdi, (unsigned long*) rsi);
+        case SYS_GETTID:
+            return sys_gettid();
 
         case SYS_GETDENTS64: // sys_getdents64
             return sys_getdents64(rdi, (__user void*)rsi, rdx);
@@ -257,7 +263,7 @@ int sys_open(
     if (!filename)
         return -E_INVAL;
 
-    if (!_scheduler_current_process->opened_file_table)
+    if (!current_process->opened_file_table)
         return -E_INVAL;
 
     char kpath[PATH_MAX];
@@ -268,7 +274,7 @@ int sys_open(
         return -E_INVAL;
 
     
-    file* table = (file*)_scheduler_current_process->opened_file_table;
+    file* table = (file*)current_process->opened_file_table;
     int fd = -1;
     
     for (int i = 3; i < DEFAULT_FILE_TABLE_ENTRIES; i++) {
@@ -327,13 +333,13 @@ ssize_t sys_read(
     if (!buf)
         return -E_INVAL;
 
-    if (!_scheduler_current_process->opened_file_table)
+    if (!current_process->opened_file_table)
         return -E_INVAL;
 
     if (fd >= DEFAULT_FILE_TABLE_ENTRIES)
         return -E_INVAL;
 
-    file *fil = &((file*)_scheduler_current_process->opened_file_table)[fd];
+    file *fil = &((file*)current_process->opened_file_table)[fd];
 
     if (!fil->f_inode || !fil->f_ops || !fil->f_ops->read)
         return -E_INVAL;
@@ -380,13 +386,13 @@ ssize_t sys_write(
     if (!buf)
         return -E_INVAL;
 
-    if (!_scheduler_current_process->opened_file_table)
+    if (!current_process->opened_file_table)
         return -E_INVAL;
 
     if (fd >= DEFAULT_FILE_TABLE_ENTRIES)
         return -E_INVAL;
     
-    file *fil = &((file*)_scheduler_current_process->opened_file_table)[fd];
+    file *fil = &((file*)current_process->opened_file_table)[fd];
 
     if (!fil->f_inode || !fil->f_ops || !fil->f_ops->write)
         return -E_INVAL;
@@ -419,13 +425,13 @@ int sys_close(
     Sys_Debug("close called: fd=%d\n", (int)fd);
 #endif
 
-    if (!_scheduler_current_process->opened_file_table)
+    if (!current_process->opened_file_table)
         return -E_INVAL;
 
     if (fd >= DEFAULT_FILE_TABLE_ENTRIES)
         return -E_INVAL;
 
-    file *fil = &((file*)_scheduler_current_process->opened_file_table)[fd];
+    file *fil = &((file*)current_process->opened_file_table)[fd];
 
     if (!fil->f_inode)
         return -E_INVAL;
@@ -455,31 +461,20 @@ loff_t sys_lseek(
 ) {
     if(fd<3) return -E_SPIPE;
 
-    if (!_scheduler_current_process->opened_file_table)
+    if (!current_process->opened_file_table)
         return -E_INVAL;
 
     if (fd >= DEFAULT_FILE_TABLE_ENTRIES)
         return -E_INVAL;
 
-    file* fil = &((file*)_scheduler_current_process->opened_file_table)[fd];
+    file* fil = &((file*)current_process->opened_file_table)[fd];
 
     if (!fil->f_inode )
         return -E_INVAL;
 
-    switch (origin) {
-        case SEEK_SET:
-            fil->f_pos = offset;
-            return offset;
-            
-        case SEEK_CUR:
-            fil->f_pos += offset;
-            return fil->f_pos;
-            
-        case SEEK_END:
-            fil->f_pos = fil->f_inode->i_size + offset;
-            return fil->f_pos;
-            
-    }
+    if(fil->f_ops && fil->f_ops->lseek) return fil->f_ops->lseek(fil, offset, origin);
+    return -E_INVAL;
+    
 }
 
 
@@ -491,7 +486,7 @@ void* sys_mmap(
     unsigned long fd,
     loff_t off
 ) {
-
+    return (void*)0;
 }
 
 
@@ -520,7 +515,7 @@ int sys_mprotect(
          addr += PAGE_SIZE_4K)
     {
         uint64_t* pml4 = (uint64_t*)PHYS_2_HHDM(
-            _scheduler_current_process->cr3 & PTE_ADDR_MASK
+            current_process->cr3 & PTE_ADDR_MASK
         );
         
         uintptr_t phys = page_dir_virt_to_phys(pml4, addr);
@@ -530,7 +525,7 @@ int sys_mprotect(
 
         uint64_t* pte = (uint64_t*)phys;
 
-        Sys_log("%llx\n", _scheduler_current_process->cr3);
+        Sys_log("%llx\n", current_process->cr3);
         Sys_log("%llx\n", pte);
         *pte &= ~(PTE_USER | PTE_WRITABLE | PTE_NX);
         *pte |= flags;
@@ -546,7 +541,7 @@ int sys_munmap(
     uintptr_t addr,
     size_t len
 ) {
-    uint64_t *pml4 = PHYS_2_HHDM(_scheduler_current_process->cr3);
+    uint64_t *pml4 = PHYS_2_HHDM(current_process->cr3);
 
     uintptr_t start = addr & ~(PAGE_SIZE_4K - 1);
     uintptr_t end = (addr + len + PAGE_SIZE_4K - 1) & ~(PAGE_SIZE_4K - 1);
@@ -560,7 +555,7 @@ int sys_munmap(
 
 
 uintptr_t sys_brk(size_t brk) {
-    heap_t *heap = &_scheduler_current_process->heap;
+    heap_t *heap = &current_process->heap;
 
     if (brk == 0)
         return heap->higher;
@@ -581,7 +576,7 @@ uintptr_t sys_brk(size_t brk) {
             return -E_NOMEM;
 
         map_4k_pages(
-            PHYS_2_HHDM(_scheduler_current_process->cr3),
+            PHYS_2_HHDM(current_process->cr3),
             old_page,
             phys,
             pages,
@@ -607,14 +602,20 @@ uintptr_t sys_brk(size_t brk) {
 
 
 pid_t sys_getpid() {
-    return _scheduler_current_process->pid;
+    return current_process->pid;
 }
 
 
 pid_t sys_fork(register_t rsp) {
-    pid_t pid = fork_process(_scheduler_current_process, rsp);
+    
+    pid_t pid = fork_process(current_thread, rsp);
+    id_kind_t e;
+    sleep_ms(1000);
+    sleep_ms(1000);
+    ((tcb_t*)id_lookup(6,&e))->state=TCB_STATE_RUNNABLE;
     if(pid < 1) return -E_NOMEM;
-
+    id_kind_t kind_out;
+    Sys_Warning("fork %d     %d\n",(int)pid, ((pcb_t*)id_lookup(pid+1, &kind_out))->state);
     return pid;
 }
 
@@ -633,8 +634,8 @@ int sys_execve(
     char** kargv = _copy_user_strv(argv);
     char** kenvp = _copy_user_strv(envp);
 
-    int ret = exec_elf_from_vfs(_scheduler_current_process, kpath, kargv, kenvp, rsp);
-
+    int ret = exec_elf_from_vfs(current_thread, kpath, kargv, kenvp, rsp);
+    Sys_Warning("exec %d\n",(int)ret);
     _free_strv(kargv);
     _free_strv(kenvp);
 
@@ -642,14 +643,73 @@ int sys_execve(
 }
 
 
-void sys_exit(  
+void sys_exit(
     int code,
     register_t rsp
 ) {
-    _scheduler_current_process->exit_code = code;
-    _scheduler_current_process->state     = PCB_STATE_DEAD;
-
+    usproc_exit(current_process, code);
     yield_core(rsp);
+}
+
+pid_t sys_wait4(
+    pid_t pid,
+    __user int* wstatus,
+    int options,
+    __user struct rusage* rusage,
+    register_t rsp
+) {
+    (void)rusage; // TODO
+
+    pcb_t* parent = current_process;
+    if (parent->pid == 0) return -E_CHILD;
+
+    if (pid == 0 || pid < -1) {
+        
+        return -E_INVAL;
+    }
+
+    if (pid > 0) {
+        id_kind_t kind;
+        void* obj = id_lookup(pid, &kind);
+        if (!obj || kind != ID_PROC || ((pcb_t*)obj)->parent != parent)
+            return -E_CHILD;
+    }
+
+    while (true) {
+        pcb_t* zombie = NULL;
+        bool has_matching_child = false;
+
+        acquire_lock(&scheduler_lock, SCHED_LOCK_BIT);
+        struct hlist_node* cn = parent->childs.first;
+        while (cn) {
+            pcb_t* c = container_of(cn, pcb_t, siblings_list_node);
+            if (pid == -1 || c->pid == pid) {
+                has_matching_child = true;
+                if (c->state & PCB_STATE_ZOMBIE) { zombie = c; break; }
+            }
+            // Sys_Debug("searching : %d    lookup: %d(state: %s (%x) ; ret: %d)\n", pid, c->pid, _tcb_state_str(c->state),c->state,c->exit_code);
+            cn = cn->next;
+        }
+        release_lock(&scheduler_lock, SCHED_LOCK_BIT);
+
+        if (zombie) {
+            pid_t ret_pid   = zombie->pid;
+            int exit_code = zombie->exit_code;
+            reap_us_proc_threads(zombie);
+
+            if (wstatus)
+                copy_to_user(wstatus, &exit_code, sizeof(exit_code));
+
+            return ret_pid;
+        }
+
+        if (!has_matching_child) return -E_CHILD;
+
+        if (options & WNOHANG) return 0;
+        
+        _yield();
+    }
+
 }
 
 
@@ -679,10 +739,10 @@ char* sys_getcwd(
     if (!buf || size == 0)
         return (char*)-E_INVAL;
 
-    if (!_scheduler_current_process->cwd_i)
+    if (!current_process->cwd_i)
         return (char*)-E_INVAL;
 
-    char *path = kpath_reverse(_scheduler_current_process->cwd_i->i_dentry);
+    char *path = kpath_reverse(current_process->cwd_i->i_dentry);
     if (!path)
         return (char*)-E_NOMEM;
 
@@ -837,7 +897,7 @@ int sys_chdir(
     if (!S_ISDIR(d->inode->i_mode))
         return -E_NOTDIR;
 
-    _scheduler_current_process->cwd_i = d->inode;
+        current_process->cwd_i = d->inode;
 
     return 0;
 }
@@ -846,13 +906,13 @@ int sys_chdir(
 int sys_dup(
     int oldfd
 ) {
-    if (!_scheduler_current_process->opened_file_table)
+    if (!current_process->opened_file_table)
         return -E_INVAL;
 
     if (oldfd < 0 || oldfd >= DEFAULT_FILE_TABLE_ENTRIES)
         return -E_INVAL;
 
-    file* table = (file*)_scheduler_current_process->opened_file_table;
+    file* table = (file*)current_process->opened_file_table;
 
     if (!table[oldfd].f_inode)
         return -E_INVAL;
@@ -875,14 +935,14 @@ int sys_dup2(
     int oldfd,
     int newfd
 ) {
-    if (!_scheduler_current_process->opened_file_table)
+    if (!current_process->opened_file_table)
         return -E_INVAL;
 
     if (oldfd < 0 || oldfd >= DEFAULT_FILE_TABLE_ENTRIES ||
         newfd < 0 || newfd >= DEFAULT_FILE_TABLE_ENTRIES)
         return -E_INVAL;
 
-    file* table = (file*)_scheduler_current_process->opened_file_table;
+    file* table = (file*)current_process->opened_file_table;
 
     if (!table[oldfd].f_inode)
         return -E_INVAL;
@@ -936,8 +996,8 @@ int sys_access(
     if (mode == F_OK)
         return 0;
 
-    kuid_t uid = _scheduler_current_process->uid;
-    kgid_t gid = _scheduler_current_process->gid;
+    kuid_t uid = current_process->uid;
+    kgid_t gid = current_process->gid;
 
     umode_t perm_bits;
 
@@ -982,7 +1042,9 @@ long sys_arch_prctl(
     return -E_INVAL;
 }
 
-
+long sys_gettid() {
+    return current_thread->tid;
+}
 
 
 
@@ -1001,13 +1063,13 @@ ssize_t sys_getdents64(
     if (!dirp || count == 0)
         return -E_INVAL;
 
-    if (!_scheduler_current_process->opened_file_table)
+    if (!current_process->opened_file_table)
         return -E_INVAL;
 
     if (fd >= DEFAULT_FILE_TABLE_ENTRIES)
         return -E_INVAL;
 
-    file* fil = &((file*)_scheduler_current_process->opened_file_table)[fd];
+    file* fil = &((file*)current_process->opened_file_table)[fd];
 
     if (!fil->f_inode)
         return -E_INVAL;
@@ -1077,7 +1139,7 @@ int sys_openat(
     if (!filename)
         return -E_INVAL;
 
-    if (!_scheduler_current_process->opened_file_table)
+    if (!current_process->opened_file_table)
         return -E_INVAL;
 
     char kpath[PATH_MAX];
@@ -1087,7 +1149,7 @@ int sys_openat(
     if (!start)
         return -E_INVAL;
 
-    file* table = (file*)_scheduler_current_process->opened_file_table;
+    file* table = (file*)current_process->opened_file_table;
     int fd = -1;
 
     for (int i = 3; i < DEFAULT_FILE_TABLE_ENTRIES; i++) {

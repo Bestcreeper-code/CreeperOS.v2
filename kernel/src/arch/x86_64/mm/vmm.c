@@ -554,6 +554,120 @@ void kvma_free(uintptr_t base, size_t count) {
 
 
 
+
+
+
+
+
+
+static bool uvma_is_range_free(
+    uint64_t* pml4,
+    uintptr_t va,
+    size_t count
+) {
+    for (size_t i = 0; i < count; i++) {
+        uintptr_t cur = va + i * PAGE_SIZE_4K;
+
+        uint64_t pml4e = pml4[PML4_INDEX(cur)];
+        if (!(pml4e & PTE_PRESENT))
+            continue;
+
+        uint64_t* pdpt = PHYS_2_HHDM(pml4e & PTE_ADDR_MASK);
+
+        uint64_t pdpte = pdpt[PDPT_INDEX(cur)];
+        if (!(pdpte & PTE_PRESENT))
+            continue;
+
+        //1G present mapping here
+        if (pdpte & PTE_HUGE)
+            return false;
+
+        uint64_t* pd = PHYS_2_HHDM(pdpte & PTE_ADDR_MASK);
+
+        uint64_t pde = pd[PD_INDEX(cur)];
+        if (!(pde & PTE_PRESENT))
+            continue;
+        
+        //2M present mapping here
+        if (pde & PTE_HUGE)
+            return false;
+
+        uint64_t* pt = PHYS_2_HHDM(pde & PTE_ADDR_MASK);
+        //4K present mapping here
+        if (pt[PT_INDEX(cur)] & PTE_PRESENT)
+            return false;
+    }
+
+    return true;
+}
+
+
+uintptr_t uvma_map_pages(
+    uint64_t* pml4,
+    physptr_t pa,
+    size_t count,
+    uint64_t flags,
+    uintptr_t search_start_vaddr
+) {
+    if (!pml4 || !count)
+        return 0;
+
+    if ((pa & (PAGE_SIZE_4K - 1)) ||
+        (search_start_vaddr & (PAGE_SIZE_4K - 1)))
+        return 0;
+
+    
+    flags |= PTE_PRESENT;
+
+    vmm_lock_acquire();
+
+    uintptr_t va = search_start_vaddr;
+
+    for (;;) {
+        if (uvma_is_range_free(pml4, va, count))
+            break;
+
+        va += PAGE_SIZE_4K;
+
+
+        if (va < search_start_vaddr) {
+            vmm_lock_release();
+            return 0;
+        }
+    }
+
+    
+    for (size_t i = 0; i < count; i++) {
+        map_4k_nolock(
+            pml4,
+            va + i * PAGE_SIZE_4K,
+            pa + i * PAGE_SIZE_4K,
+            flags
+        );
+    }
+
+    vmm_lock_release();
+
+    return va;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 static void vmm_free_owned_recursive(uint64_t* table, int level) {
     for (size_t i = 0; i < 512; i++) {
         uint64_t entry = table[i];

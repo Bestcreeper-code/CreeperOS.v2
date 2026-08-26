@@ -178,8 +178,8 @@ void loop(void) {
             row[x + xx] = 0x000000;
     }
 
-    _scheduler_current_process->exit_code = 0;
-    kill_ktask(_scheduler_current_process);
+    current_thread->exit_code = 0;
+    kill_ktask(current_thread);
     _yield();
 
     #undef RAND
@@ -197,14 +197,14 @@ void kmain() {
     // fs_init();
     scheduler_init();
     k_ramfile_mkdir("/tmp", 0666);
-#if !DISABLE_LOGGER_THREAD 
+#if !DISABLE_LOGGER_THREAD
     log_queue_init();
-    linked_pcb* klogger_pcb = ktask_start(_log_manager_thread, "klogger");
-    if(!klogger_pcb){
+    tcb_t* klogger_tcb = ktask_start(_log_manager_thread, "klogger");
+    if(!klogger_tcb){
         Sys_Error("couldn't init logger thread\n");
         for(;;);
     }else {
-        Sys_Success("klogger started as pid:%d\n",klogger_pcb->pid);
+        Sys_Success("klogger started as tid:%d\n", klogger_tcb->tid);
         // for(;;);
     }
 #endif
@@ -234,19 +234,29 @@ void kmain() {
     // for(;;);
     char* test_argv[] = {
         "/bin/test_task",
-        "--foo",
-        "bar",
+        "-s",
+        "123",
+        "-m",
+        "1048576",
+        "-n",
+        "100",
         NULL
     };
     
     char* test_envp[] = {
         NULL
     };
+    
+    
     // bin_exec_raw("/initrd/test.bin", test_argv, test_envp);
     load_elf_from_vfs("/initrd/test.elf",test_argv,test_envp);
-    void force_kbd_ioapic_unmask(uintptr_t ioapic_base, uint8_t vector, uint8_t dest_lapic_id) ;
+    // sleep_ms(5000);
+    // load_elf_from_vfs("/initrd/testportmalloc/nalloc/build/tests/rbtree_test",NULL,NULL);
+    // sleep_ms(5000);
+    // load_elf_from_vfs("/initrd/testportmalloc/nalloc/build/tests/fuzzer",NULL,NULL);
+    // void force_kbd_ioapic_unmask(uintptr_t ioapic_base, uint8_t vector, uint8_t dest_lapic_id) ;
     // Sys_Warning("Kernel reached halt????\n");
-    // _scheduler_current_process->state = PCB_STATE_DEAD;
+    // _scheduler_current_process->state = TCB_STATE_DEAD;
     for(;;) {
         // sti();
         // _current_eoi(33);
@@ -255,32 +265,32 @@ void kmain() {
     hcf();
 }
 
-#define IOAPIC_REGSEL 0x00
-#define IOAPIC_REGWIN 0x10
+// #define IOAPIC_REGSEL 0x00
+// #define IOAPIC_REGWIN 0x10
 
-static inline uint32_t ioapic_read_reg(uintptr_t ioapic_base, uint8_t reg) {
-    *(volatile uint32_t*)(ioapic_base + IOAPIC_REGSEL) = reg;
-    return *(volatile uint32_t*)(ioapic_base + IOAPIC_REGWIN);
-}
+// static inline uint32_t ioapic_read_reg(uintptr_t ioapic_base, uint8_t reg) {
+//     *(volatile uint32_t*)(ioapic_base + IOAPIC_REGSEL) = reg;
+//     return *(volatile uint32_t*)(ioapic_base + IOAPIC_REGWIN);
+// }
 
-static inline void ioapic_write_reg(uintptr_t ioapic_base, uint8_t reg, uint32_t val) {
-    *(volatile uint32_t*)(ioapic_base + IOAPIC_REGSEL) = reg;
-    *(volatile uint32_t*)(ioapic_base + IOAPIC_REGWIN) = val;
-}
+// static inline void ioapic_write_reg(uintptr_t ioapic_base, uint8_t reg, uint32_t val) {
+//     *(volatile uint32_t*)(ioapic_base + IOAPIC_REGSEL) = reg;
+//     *(volatile uint32_t*)(ioapic_base + IOAPIC_REGWIN) = val;
+// }
 
 
-void force_kbd_ioapic_unmask(uintptr_t ioapic_base, uint8_t vector, uint8_t dest_lapic_id) {
-    uint8_t low_reg  = 0x10 + 2 * 1;      // GSI 1 low dword
-    uint8_t high_reg = 0x10 + 2 * 1 + 1;  // GSI 1 high dword
+// void force_kbd_ioapic_unmask(uintptr_t ioapic_base, uint8_t vector, uint8_t dest_lapic_id) {
+//     uint8_t low_reg  = 0x10 + 2 * 1;      // GSI 1 low dword
+//     uint8_t high_reg = 0x10 + 2 * 1 + 1;  // GSI 1 high dword
 
-    uint32_t low  = ioapic_read_reg(ioapic_base, low_reg);
+//     uint32_t low  = ioapic_read_reg(ioapic_base, low_reg);
 
-    // brute-force stomp: vector, edge-triggered, active-high, physical dest, unmasked
-    low &= ~(1 << 16); // clear mask bit unconditionally
-    low = (low & 0xFFFFFF00) | vector;
+//     // brute-force stomp: vector, edge-triggered, active-high, physical dest, unmasked
+//     low &= ~(1 << 16); // clear mask bit unconditionally
+//     low = (low & 0xFFFFFF00) | vector;
 
-    uint32_t high = (uint32_t)dest_lapic_id << 24;
+//     uint32_t high = (uint32_t)dest_lapic_id << 24;
 
-    ioapic_write_reg(ioapic_base, high_reg, high);
-    ioapic_write_reg(ioapic_base, low_reg, low);
-}
+//     ioapic_write_reg(ioapic_base, high_reg, high);
+//     ioapic_write_reg(ioapic_base, low_reg, low);
+// }

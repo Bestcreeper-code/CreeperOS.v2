@@ -20,7 +20,7 @@
 static uint8_t current_fg = ANSI_WHITE;
 static uint8_t current_bg = ANSI_BG_BLACK;
 
-static volatile bool is_threaded = false;
+volatile bool klogger_is_threaded = false;
 
 #define LOG_BUFFER_SIZE 512
 #define LOG_RING_PAGES 64
@@ -74,7 +74,7 @@ void log_queue_init() {
 }
 
 void _log_manager_thread() {
-    is_threaded = true;
+    klogger_is_threaded = true;
 
     while (true) {
         log_slot_t *slot = &log_ring_queue[log_ring_queue_read_idx];
@@ -99,7 +99,7 @@ void sys_serial_vlogf(const char* format, const char* file,
     uint64_t secs = ms / 1000;
     uint64_t millis = ms % 1000;
 
-    if (!is_threaded) {
+    if (!klogger_is_threaded) {
         char msg[LOG_BUFFER_SIZE];
         vsnprintf(msg, sizeof(msg), format, args);
 
@@ -184,7 +184,7 @@ void ktty_write(const char* data, size_t len) {
         if (chunk > LOG_BUFFER_SIZE - 1)
             chunk = LOG_BUFFER_SIZE - 1;
 
-        if (!is_threaded) {
+        if (!klogger_is_threaded) {
             char msg[LOG_BUFFER_SIZE];
             memcpy(msg, data + written, chunk);
             msg[chunk] = '\0';

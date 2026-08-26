@@ -164,7 +164,7 @@ void log_isr_error_code(unsigned char isr_idx, uint64_t code){
 volatile char panic_count = 0;
 void _panic_handler(uint64_t isr_index, uint64_t err_code, cpu_registers_t* regs, uint64_t* call_stack) {
 
-    
+    klogger_is_threaded=false;
     
     if (panic_count >= MAX_KPANIK_COUNT) {
         Sys_Fatal("Double Fault (%lx) %lx\n", isr_index, regs->cr2);
@@ -199,8 +199,8 @@ void _panic_handler(uint64_t isr_index, uint64_t err_code, cpu_registers_t* regs
         isr_index, error_name, err_code);
 
     Sys_log_NoPos(" A critical error has occurred");
-    if(_scheduler_current_process && _scheduler_current_process->name) 
-        Sys_log_NoPos(" in process %s (pid: %d)", _scheduler_current_process->name, _scheduler_current_process->pid);
+    if(current_process && current_process->name) 
+        Sys_log_NoPos(" in process %s (pid: %d)", current_process->name, current_process->pid);
     Sys_log_NoPos(":\n");
 
     Sys_log_NoPos(" Error Code: %s (%03ld: %lx)\n",
@@ -284,16 +284,6 @@ void _manual_panic(const char* error, const char* info) {
 
     if (info) {
         Sys_Info("%s",info);
-    }
-
-    Sys_log_NoPos(" Rebooting in 5 sec...\n");
-
-    asm volatile("sti");
-
-    printf("\n\n\n#");
-    for (int i = 0; i < 4; i++) {
-        printf("#");
-        sleep_ms(1000);
     }
 
     // pc_reboot();

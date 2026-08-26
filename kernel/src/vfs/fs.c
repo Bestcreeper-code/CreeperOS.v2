@@ -1,5 +1,6 @@
 #include "debug/Logger.h"
 #include "memory/memory.h"
+#include "scheduler/scheduler.h"
 #include "vfs/vfs.h"
 
 
@@ -318,7 +319,7 @@ struct inode* path_resolve_start(const char* path)
         return root_dentry->inode;
 
 
-    return _scheduler_current_process->cwd_i;
+    return current_process->cwd_i;
 }
 
 int split_path(const char* path, char **out_parent, char **out_name)

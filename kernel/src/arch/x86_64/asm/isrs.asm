@@ -2,6 +2,7 @@
 
 extern _panic_handler
 extern _current_eoi
+extern panic_count
 
 %define MAX_STACK_TRACE_SIZE 16
 
@@ -95,7 +96,7 @@ isr_call_stack  resq MAX_STACK_TRACE_SIZE
 
 section .text
 isr_common_handler:
-    movzx edi, byte [rsp + 196] ;vector
+    movzx edi, byte [rsp + 196]
 
     mov  rax, [rel _current_eoi]
     call rax
@@ -103,8 +104,26 @@ isr_common_handler:
     mov  rax, [rsp + 128]
     mov  [isr_call_stack], rax
 
+    cmp  byte [rel panic_count], 0
+    jne  .zero_trace
+
+    mov  byte [rel panic_count], 1
+
+    cmp  byte [rsp + 196], 8
+    je   .zero_trace
+
+    movzx eax, word [rsp + 144]
+    test al, 3
+    jnz  .zero_trace
+
     mov  rbp, [rsp + 48]
     mov  rcx, 1
+
+    mov  rax, rbp
+    mov  rdx, 0xffff800000000000
+    cmp  rax, rdx
+    jb   .zero_trace
+
 .trace_loop:
     cmp  rcx, MAX_STACK_TRACE_SIZE
     jge  .trace_done
@@ -112,6 +131,12 @@ isr_common_handler:
     jz   .trace_done
     test rbp, 7
     jnz  .trace_done
+
+    mov  rax, rbp
+    mov  rdx, 0xffff800000000000
+    cmp  rax, rdx
+    jb   .trace_done
+
     mov  rax, [rbp + 8]
     test rax, rax
     jz   .trace_done
@@ -119,6 +144,7 @@ isr_common_handler:
     inc  rcx
     mov  rbp, [rbp]
     jmp  .trace_loop
+
 .trace_done:
     cmp  rcx, MAX_STACK_TRACE_SIZE
     jge  .zero_done
@@ -128,6 +154,28 @@ isr_common_handler:
     cmp  rcx, MAX_STACK_TRACE_SIZE
     jl   .zero_loop
 .zero_done:
+    mov  rdi, [rsp + 196]
+    mov  rsi, [rsp + 204]
+    lea  rdx, [rsp]
+    lea  rcx, [isr_call_stack]
+    sub  rsp, 8
+    call _panic_handler
+    add  rsp, 8
+
+    RESTORE_ALL
+    add  rsp, 16
+    iretq
+
+.zero_trace:
+    mov  rcx, 1
+.zero_loop2:
+    cmp  rcx, MAX_STACK_TRACE_SIZE
+    jge  .panic
+    mov  qword [isr_call_stack + rcx*8], 0
+    inc  rcx
+    jmp  .zero_loop2
+
+.panic:
     mov  rdi, [rsp + 196]
     mov  rsi, [rsp + 204]
     lea  rdx, [rsp]

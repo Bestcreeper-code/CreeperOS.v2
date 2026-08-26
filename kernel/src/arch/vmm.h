@@ -89,5 +89,8 @@ void vmm_kvma_init();
 uintptr_t kvma_alloc(size_t count);
 void kvma_free(uintptr_t base, size_t count);
 
+
+uintptr_t uvma_map_pages(uint64_t* pml4, physptr_t pa, size_t count, uint64_t flags, uintptr_t search_start_vaddr);
+
 uintptr_t vmm_virt_to_phys(uintptr_t vaddr);
-uintptr_t page_dir_virt_to_phys(uint64_t* pml4, uintptr_t vaddr);
+uintptr_t page_dir_virt_to_phys(uint64_t* pml4, uintptr_t vaddr); 

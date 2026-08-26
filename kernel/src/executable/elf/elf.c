@@ -1,7 +1,9 @@
 #include "elf.h"
 #include "config.h"
 #include "debug/Logger.h"
+#include "defines/container_of.h"
 #include "defines/err_codes.h"
+#include "scheduler/scheduler.h"
 #include "vfs/vfs.h"
 #include "vfs/fs.h"
 #include "memory/pmm.h"
@@ -36,6 +38,9 @@ int elf64_validate(elf64_ehdr* eh)
 
     return 0;
 }
+
+
+
 
 pid_t load_elf_from_vfs(const char* vfs_path, char** argv, char** envp)
 {
@@ -144,7 +149,6 @@ pid_t load_elf_from_vfs(const char* vfs_path, char** argv, char** envp)
                   (ph->p_flags & PF_X) ? 'X' : '-',
                   seg_pages, (void*)seg_phys);
 #endif
- 
         uint64_t map_flags = PTE_PRESENT | PTE_USER | PTE_LOCAL_OWNED;
 
         if (ph->p_flags & PF_W)
@@ -168,18 +172,21 @@ pid_t load_elf_from_vfs(const char* vfs_path, char** argv, char** envp)
 
     pmm_free_pages(raw_image, raw_pages);
 
-    linked_pcb* pcb = us_task_start(
+    pcb_t* proc = new_usproc(
+        current_process,
         (void*)ehdr->e_entry,
-        vfs_path,
+        (char*)vfs_path,
         pml4,
         argv,
         envp
     );
-    pcb->cwd_i = dent->parent->inode;
+    RET_IF(!proc, -E_NOMEM);
+
+    proc->cwd_i = dent->parent->inode;
 
     
-    pcb->state = PCB_STATE_RUNNING;
-    RET_IF(!pcb, -E_NOMEM);
+    tcb_t* main_thread = container_of(proc->threads.first, tcb_t, proc_list_node);
+    main_thread->state = TCB_STATE_RUNNABLE;
 
-    return pcb->pid;
+    return proc->pid;
 }

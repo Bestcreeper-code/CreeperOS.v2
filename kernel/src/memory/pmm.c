@@ -79,14 +79,10 @@ static size_t bitmap_find_clear_range(size_t count) {
 
 void pmm_init() {
     struct limine_memmap_response *mm = memmap_request.response;
-    uintptr_t highest_addr = 0;
     for (uint64_t i = 0; i < mm->entry_count; i++) {
         struct limine_memmap_entry *e = mm->entries[i];
-        uintptr_t end = (uintptr_t)(e->base + e->length);
-        if (e->type == LIMINE_MEMMAP_USABLE && end > highest_addr)
-        highest_addr = end;
+        if (e->type == LIMINE_MEMMAP_USABLE) total_pages+=e->length;
     }
-    total_pages = (size_t)(highest_addr / PMM_PAGE_SIZE);
     bitmap_bits = total_pages;
     bitmap_next = 0;
     size_t bitmap_size = (total_pages + 7) / 8;
@@ -105,7 +101,7 @@ void pmm_init() {
 
     bitmap = phys_to_virt(bitmap_phys);
     memset(bitmap, 0xFF, bitmap_size);
-    if (!bitmap_test(0)) {
+    if (bitmap_test(0)) {
         bitmap_set(0);
         free_pages--;
     }

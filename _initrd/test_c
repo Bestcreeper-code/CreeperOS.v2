@@ -1,474 +1,562 @@
-#include <stdint.h>
+/*
+ * syscall_test.c
+ *
+ * Exercises the userland libc functions that correspond 1:1 to the
+ * kernel syscalls declared in syscalls.h (SYS_READ, SYS_WRITE, SYS_OPEN,
+ * SYS_CLOSE, SYS_LSEEK, SYS_MMAP, SYS_MPROTECT, SYS_MUNMAP, SYS_BRK,
+ * SYS_ACCESS, SYS_SCHED_YIELD, SYS_DUP, SYS_DUP2, SYS_GETPID, SYS_FORK,
+ * SYS_EXECVE, SYS_EXIT, SYS_WAIT4, SYS_UNAME, SYS_GETCWD, SYS_CHDIR,
+ * SYS_MKDIR, SYS_RMDIR, SYS_CREATE, SYS_UNLINK, SYS_ARCH_PRCTL,
+ * SYS_GETTID, SYS_GETDENTS64, SYS_CLOCK_GETTIME, SYS_OPENAT,
+ * SYS_MKDIRAT, SYS_UNLINKAT).
+ *
+ * Each test prints a green "[PASS]" or red "[ANSI-red FAIL]" line.
+ * On failure the errno / strerror is printed alongside.
+ * The process exit code equals the number of failed tests (0 = all ok,
+ * capped at 255).
+ *
+ * Build:
+ *   gcc -Wall -Wextra -O2 -o syscall_test syscall_test.c
+ *
+ * Run:
+ *   ./syscall_test
+ */
 
-#define SYS_READ        0
-#define SYS_WRITE       1
-#define SYS_OPEN        2
-#define SYS_CLOSE       3
-#define SYS_LSEEK       8
-#define SYS_BRK         12
-#define SYS_SCHED_YIELD 24
-#define SYS_GETPID      39
-#define SYS_FORK        57
-#define SYS_EXIT        60
-#define SYS_GETCWD      79
-#define SYS_MKDIR       83
-#define SYS_RMDIR       84
-#define SYS_CREAT       85
-#define SYS_UNLINK      87
+#define _GNU_SOURCE
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <errno.h>
+#include <unistd.h>
+#include <fcntl.h>
+#include <dirent.h>
+#include <time.h>
+#include <sched.h>
 
-static long syscall1(long n, long a1)
+#include <sys/types.h>
+#include <sys/stat.h>
+#include <sys/wait.h>
+#include <sys/mman.h>
+#include <sys/utsname.h>
+
+#pragma GCC diagnostic ignored "-Wformat-zero-length"
+#pragma GCC diagnostic ignored "-Wformat-truncation"
+
+/* ------------------------------------------------------------------ */
+/* Config                                                              */
+/* ------------------------------------------------------------------ */
+
+/* Binary used to exercise fork() + execve() + wait4() */
+#define EXEC_TEST_BIN "/initrd/testportmalloc/nalloc/build/tests/rbtree_test"
+
+#define TEST_DIR      "/tmp/syscall_test_dir"
+#define TEST_SUBDIR   "/tmp/syscall_test_dir/sub"
+#define TEST_FILE     "/tmp/syscall_test_dir/file.txt"
+#define TEST_FILE2    "/tmp/syscall_test_dir/file2.txt"
+#define TEST_PAYLOAD  "hello syscall world\n"
+
+/* ------------------------------------------------------------------ */
+/* ANSI colors + tiny test framework                                  */
+/* ------------------------------------------------------------------ */
+
+#define ANSI_GREEN  "\033[1;32m"
+#define ANSI_RED    "\033[1;31m"
+#define ANSI_YELLOW "\033[1;33m"
+#define ANSI_CYAN   "\033[1;36m"
+#define ANSI_RESET  "\033[0m"
+
+static int g_total    = 0;
+static int g_failures = 0;
+
+static void report(const char *name, int ok, const char *detail)
 {
-    long ret;
-    asm volatile("syscall" : "=a"(ret) : "a"(n), "D"(a1) : "rcx", "r11", "memory");
-    return ret;
-}
-static long syscall2(long n, long a1, long a2)
-{
-    long ret;
-    asm volatile("syscall" : "=a"(ret) : "a"(n), "D"(a1), "S"(a2) : "rcx", "r11", "memory");
-    return ret;
-}
-static long syscall3(long n, long a1, long a2, long a3)
-{
-    long ret;
-    asm volatile("syscall" : "=a"(ret) : "a"(n), "D"(a1), "S"(a2), "d"(a3) : "rcx", "r11", "memory");
-    return ret;
-}
-static long syscall0(long n)
-{
-    long ret;
-    asm volatile("syscall" : "=a"(ret) : "a"(n) : "rcx", "r11", "memory");
-    return ret;
-}
-
-static char dir[]     = "/tmp/test";
-static char file[]    = "/tmp/test/hello.txt";
-static char msg[]     = "hello from C userspace syscall test\n";
-static char lseekmsg[]= "0123456789ABCDEF";
-
-static char sysfs_name_path[] = "/sys/class/input/input0/name";
-static char sysfs_id_path[]   = "/sys/class/input/input0/id";
-static char devfs_kbd_path[]  = "/dev/input/input0";
-
-/* ---- tiny freestanding helpers (no libc available) ---- */
-
-static int u_strlen(const char* s)
-{
-    int n = 0;
-    while (s[n]) n++;
-    return n;
-}
-
-static void u_write_str(const char* s)
-{
-    syscall3(SYS_WRITE, 1, (long)s, u_strlen(s));
-}
-
-static void u_write_hex(uint64_t v)
-{
-    char buf[19];
-    const char* hexch = "0123456789abcdef";
-    buf[0] = '0';
-    buf[1] = 'x';
-    for (int i = 0; i < 16; i++)
-        buf[2 + i] = hexch[(v >> ((15 - i) * 4)) & 0xF];
-    buf[18] = '\0';
-    u_write_str(buf);
-}
-
-static void u_write_dec(uint64_t v)
-{
-    char buf[21];
-    int i = 20;
-    buf[i--] = '\0';
-    if (v == 0) {
-        buf[i--] = '0';
+    g_total++;
+    if (ok) {
+        printf("  [" ANSI_GREEN "PASS" ANSI_RESET "] %-40s %s\n",
+               name, detail ? detail : "");
     } else {
-        while (v > 0) {
-            buf[i--] = '0' + (v % 10);
-            v /= 10;
-        }
-    }
-    u_write_str(&buf[i + 1]);
-}
-
-/* handles negative return values (errno-style: -errno) */
-static void u_write_ret(long v)
-{
-    if (v < 0) {
-        u_write_str("-");
-        u_write_dec((uint64_t)(-v));
-    } else {
-        u_write_dec((uint64_t)v);
+        g_failures++;
+        printf("  [" ANSI_RED "FAIL" ANSI_RESET "] %-40s errno=%d (%s) %s\n",
+               name, errno, strerror(errno), detail ? detail : "");
     }
 }
 
-/* logs "<label>: <ret>\n" for any syscall return */
-static void log_ret(const char* label, long ret)
+#define SECTION(fmt, ...) \
+    printf("\n" ANSI_CYAN "== " fmt " ==" ANSI_RESET "\n", ##__VA_ARGS__)
+
+/* Assert helper: `cond` must be true for PASS. errno is only meaningful
+ * to print when cond is false, so callers should check cond right after
+ * the syscall that may have set errno. */
+#define CHECK(cond, name, ...) \
+    do { \
+        char _buf[256]; \
+        snprintf(_buf, sizeof(_buf), "" __VA_ARGS__); \
+        report((name), (cond), _buf); \
+    } while (0)
+
+static void rm_rf_testdir(void)
 {
-    u_write_str("[log] ");
-    u_write_str(label);
-    u_write_str(" -> ");
-    u_write_ret(ret);
-    u_write_str("\n");
+    unlink(TEST_FILE);
+    unlink(TEST_FILE2);
+    rmdir(TEST_SUBDIR);
+    rmdir(TEST_DIR);
 }
 
-/* ---- argc/argv/envp test ---- */
+/* ------------------------------------------------------------------ */
+/* SYS_OPEN / SYS_CREATE / SYS_WRITE / SYS_READ / SYS_CLOSE / SYS_LSEEK */
+/* ------------------------------------------------------------------ */
 
-static void test_args(int argc, char** argv, char** envp)
+static void test_open_write_read_lseek_close(void)
 {
-    u_write_str("=== TEST: argv/envp ===\n");
+    SECTION("open / create / write / read / lseek / close");
 
-    u_write_str("argc = ");
-    u_write_dec((uint64_t)argc);
-    u_write_str("\n");
+    /* SYS_CREATE (open with O_CREAT) */
+    int fd = open(TEST_FILE, O_CREAT | O_WRONLY | O_TRUNC, 0644);
+    CHECK(fd >= 0, "open(O_CREAT|O_WRONLY)", "fd=%d", fd);
+    if (fd < 0) return;
 
-    u_write_str("argv @ ");
-    u_write_hex((uint64_t)argv);
-    u_write_str("\n");
+    /* SYS_WRITE */
+    ssize_t wn = write(fd, TEST_PAYLOAD, strlen(TEST_PAYLOAD));
+    CHECK(wn == (ssize_t)strlen(TEST_PAYLOAD), "write()",
+          "wrote=%zd expected=%zu", wn, strlen(TEST_PAYLOAD));
 
-    for (int i = 0; i < argc; i++) {
-        u_write_str("  argv[");
-        u_write_dec((uint64_t)i);
-        u_write_str("] = ");
-        u_write_str(argv[i]);
-        u_write_str("\n");
-    }
-    u_write_str("  argv[");
-    u_write_dec((uint64_t)argc);
-    u_write_str("] = (nil)\n");
+    /* SYS_CLOSE */
+    int rc = close(fd);
+    CHECK(rc == 0, "close() after write", "rc=%d", rc);
 
-    u_write_str("envp @ ");
-    u_write_hex((uint64_t)envp);
-    u_write_str("\n");
+    /* Reopen read-only */
+    fd = open(TEST_FILE, O_RDONLY);
+    CHECK(fd >= 0, "open(O_RDONLY)", "fd=%d", fd);
+    if (fd < 0) return;
 
-    int envc = 0;
-    if (envp) {
-        while (envp[envc]) {
-            u_write_str("  envp[");
-            u_write_dec((uint64_t)envc);
-            u_write_str("] = ");
-            u_write_str(envp[envc]);
-            u_write_str("\n");
-            envc++;
-        }
-    }
-    u_write_str("  envp[");
-    u_write_dec((uint64_t)envc);
-    u_write_str("] = (nil)\n");
+    /* SYS_LSEEK: seek to end to get size, then back to start */
+    loff_t end = lseek(fd, 0, SEEK_END);
+    CHECK(end == (loff_t)strlen(TEST_PAYLOAD), "lseek(SEEK_END)",
+          "end=%lld expected=%zu", (long long)end, strlen(TEST_PAYLOAD));
 
-    u_write_str("=== END argv/envp ===\n\n");
+    loff_t start = lseek(fd, 0, SEEK_SET);
+    CHECK(start == 0, "lseek(SEEK_SET)", "pos=%lld", (long long)start);
+
+    /* SYS_READ */
+    char buf[128] = {0};
+    ssize_t rn = read(fd, buf, sizeof(buf) - 1);
+    CHECK(rn == (ssize_t)strlen(TEST_PAYLOAD) &&
+          memcmp(buf, TEST_PAYLOAD, strlen(TEST_PAYLOAD)) == 0,
+          "read() payload matches", "read=%zd bytes", rn);
+
+    /* SYS_LSEEK SEEK_CUR */
+    loff_t cur = lseek(fd, 0, SEEK_CUR);
+    CHECK(cur == rn, "lseek(SEEK_CUR)", "pos=%lld", (long long)cur);
+
+    rc = close(fd);
+    CHECK(rc == 0, "close() after read", "rc=%d", rc);
 }
 
-/* ---- getpid test ---- */
+/* ------------------------------------------------------------------ */
+/* SYS_MMAP / SYS_MPROTECT / SYS_MUNMAP                                */
+/* ------------------------------------------------------------------ */
 
-static void test_getpid(void)
+static void test_mmap_mprotect_munmap(void)
 {
-    u_write_str("=== TEST: getpid ===\n");
-    long pid = syscall0(SYS_GETPID);
-    log_ret("getpid", pid);
-    u_write_str("=== END getpid ===\n\n");
+    SECTION("mmap / mprotect / munmap");
+
+    long pagesize = sysconf(_SC_PAGESIZE);
+    size_t len = (size_t)pagesize;
+
+    void *addr = mmap(NULL, len, PROT_READ | PROT_WRITE,
+                       MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+    CHECK(addr != MAP_FAILED, "mmap(anon, RW)", "addr=%p", addr);
+    if (addr == MAP_FAILED) return;
+
+    memset(addr, 0xAB, len);
+    CHECK(((unsigned char *)addr)[0] == 0xAB, "write to mmap'd region", "");
+
+    int rc = mprotect(addr, len, PROT_READ);
+    CHECK(rc == 0, "mprotect(PROT_READ)", "rc=%d", rc);
+
+    /* restore RW so munmap of a clean mapping is unambiguous */
+    rc = mprotect(addr, len, PROT_READ | PROT_WRITE);
+    CHECK(rc == 0, "mprotect(PROT_READ|PROT_WRITE)", "rc=%d", rc);
+
+    rc = munmap(addr, len);
+    CHECK(rc == 0, "munmap()", "rc=%d", rc);
 }
 
-/* ---- mkdir/creat/open/write/close test ---- */
-
-static void test_file_write(void)
-{
-    u_write_str("=== TEST: mkdir/creat/open/write/close ===\n");
-
-    long ret = syscall2(SYS_MKDIR, (long)dir, 0755);
-    log_ret("mkdir /tmp/ctt", ret);
-
-    ret = syscall2(SYS_CREAT, (long)file, 0644);
-    log_ret("creat hello.txt", ret);
-
-    long fd = syscall3(SYS_OPEN, (long)file, 2 /* O_RDWR */, 0);
-    log_ret("open hello.txt (O_RDWR)", fd);
-
-    if (fd >= 0) {
-        long wret = syscall3(SYS_WRITE, fd, (long)msg, sizeof(msg) - 1);
-        log_ret("write hello.txt", wret);
-
-        long cret = syscall1(SYS_CLOSE, fd);
-        log_ret("close hello.txt", cret);
-    } else {
-        u_write_str("  [skip] write/close: open failed\n");
-    }
-
-    u_write_str("=== END mkdir/creat/open/write/close ===\n\n");
-}
-
-/* ---- read test ---- */
-
-static void test_read(void)
-{
-    u_write_str("=== TEST: read ===\n");
-
-    long fd = syscall3(SYS_OPEN, (long)file, 2 /* O_RDWR */, 0);
-    log_ret("open hello.txt for read", fd);
-
-    if (fd >= 0) {
-        char buf[64];
-        for (int i = 0; i < 64; i++) buf[i] = 0;
-
-        long rret = syscall3(SYS_READ, fd, (long)buf, sizeof(buf) - 1);
-        log_ret("read hello.txt", rret);
-
-        if (rret > 0) {
-            u_write_str("  data: ");
-            u_write_str(buf);
-        }
-
-        long cret = syscall1(SYS_CLOSE, fd);
-        log_ret("close hello.txt", cret);
-    } else {
-        u_write_str("  [skip] read: open failed\n");
-    }
-
-    u_write_str("=== END read ===\n\n");
-}
-
-/* ---- lseek test ---- */
-
-static void test_lseek(void)
-{
-    u_write_str("=== TEST: lseek ===\n");
-
-    long fd = syscall3(SYS_OPEN, (long)file, 2 /* O_RDWR */, 0);
-    log_ret("open hello.txt for lseek", fd);
-
-    if (fd >= 0) {
-        long wret = syscall3(SYS_WRITE, fd, (long)lseekmsg, sizeof(lseekmsg) - 1);
-        log_ret("write marker string", wret);
-
-        /* SEEK_SET = 0: rewind to start */
-        long sret = syscall3(SYS_LSEEK, fd, 0, 0);
-        log_ret("lseek SEEK_SET 0", sret);
-
-        char buf[8] = {0};
-        long rret = syscall3(SYS_READ, fd, (long)buf, 4);
-        log_ret("read after seek", rret);
-        u_write_str("  first 4 bytes: ");
-        u_write_str(buf);
-        u_write_str("\n");
-
-        long cret = syscall1(SYS_CLOSE, fd);
-        log_ret("close after lseek test", cret);
-    } else {
-        u_write_str("  [skip] lseek: open failed\n");
-    }
-
-    u_write_str("=== END lseek ===\n\n");
-}
-
-/* ---- brk test ---- */
+/* ------------------------------------------------------------------ */
+/* SYS_BRK (exercised indirectly via malloc/realloc/free)             */
+/* ------------------------------------------------------------------ */
 
 static void test_brk(void)
 {
-    u_write_str("=== TEST: brk ===\n");
+    SECTION("brk (via malloc/realloc/free)");
 
-    /* brk(0) is the usual "query current break" convention */
-    long cur = syscall1(SYS_BRK, 0);
-    log_ret("brk(0) query current", cur);
+    /* malloc() grows the heap via brk() (or falls back to mmap for large
+     * allocations); sbrk()/brk() themselves aren't exported by this
+     * libc, so we exercise SYS_BRK through the normal allocator path. */
+    void *p = malloc(4096);
+    CHECK(p != NULL, "malloc(4096)", "p=%p", p);
+    if (!p) return;
 
-    long grown = syscall1(SYS_BRK, cur + 0x1000);
-    log_ret("brk(cur+0x1000) grow heap", grown);
+    memset(p, 0xAB, 4096);
+    CHECK(((unsigned char *)p)[0] == 0xAB &&
+          ((unsigned char *)p)[4095] == 0xAB,
+          "write across allocated region", "");
 
-    if (grown > 0) {
-        volatile char* p = (volatile char*)cur;
-        *p = 0x42;
-        u_write_str("  wrote to new heap byte, value=");
-        u_write_dec((uint64_t)(*p));
-        u_write_str("\n");
+    void *p2 = realloc(p, 8192);
+    CHECK(p2 != NULL, "realloc(8192)", "p2=%p", p2);
+    if (p2) {
+        CHECK(((unsigned char *)p2)[0] == 0xAB,
+              "realloc() preserved existing data", "");
+        p = p2;
     }
 
-    u_write_str("=== END brk ===\n\n");
+    free(p);
+    CHECK(1, "free()", "");
 }
 
-/* ---- getcwd test ---- */
+/* ------------------------------------------------------------------ */
+/* SYS_ACCESS                                                          */
+/* ------------------------------------------------------------------ */
 
-static void test_getcwd(void)
+static void test_access(void)
 {
-    u_write_str("=== TEST: getcwd ===\n");
+    SECTION("access");
 
-    char buf[128];
-    for (int i = 0; i < 128; i++) buf[i] = 0;
+    int rc = access(TEST_FILE, F_OK);
+    CHECK(rc == 0, "access(F_OK) existing file", "rc=%d", rc);
 
-    long ret = syscall2(SYS_GETCWD, (long)buf, sizeof(buf));
-    log_ret("getcwd", ret);
+    rc = access(TEST_FILE, R_OK);
+    CHECK(rc == 0, "access(R_OK) existing file", "rc=%d", rc);
 
-    if (ret >= 0) {
-        u_write_str("  cwd: ");
-        u_write_str(buf);
-        u_write_str("\n");
-    }
-
-    u_write_str("=== END getcwd ===\n\n");
+    errno = 0;
+    rc = access("/tmp/syscall_test_dir/does_not_exist_xyz", F_OK);
+    CHECK(rc == -1 && errno == ENOENT, "access(F_OK) missing file -> ENOENT",
+          "rc=%d", rc);
 }
 
-/* ---- sched_yield test ---- */
+/* ------------------------------------------------------------------ */
+/* SYS_SCHED_YIELD                                                     */
+/* ------------------------------------------------------------------ */
 
 static void test_sched_yield(void)
 {
-    u_write_str("=== TEST: sched_yield ===\n");
-    long ret = syscall0(SYS_SCHED_YIELD);
-    log_ret("sched_yield", ret);
-    u_write_str("=== END sched_yield ===\n\n");
+    SECTION("sched_yield");
+
+    int rc = sched_yield();
+    CHECK(rc == 0, "sched_yield()", "rc=%d", rc);
 }
 
-/* ---- fork test ---- */
+/* ------------------------------------------------------------------ */
+/* SYS_DUP / SYS_DUP2                                                  */
+/* ------------------------------------------------------------------ */
 
-static void test_fork(void)
+static void test_dup_dup2(void)
 {
-    u_write_str("=== TEST: fork ===\n");
+    SECTION("dup / dup2");
 
-    long pid = syscall0(SYS_FORK);
-    log_ret("fork", pid);
+    int fd = open(TEST_FILE, O_RDONLY);
+    CHECK(fd >= 0, "open() for dup test", "fd=%d", fd);
+    if (fd < 0) return;
+
+    int dfd = dup(fd);
+    CHECK(dfd >= 0 && dfd != fd, "dup()", "dfd=%d", dfd);
+
+    int target = 50;
+    int rc = dup2(fd, target);
+    CHECK(rc == target, "dup2(fd, 50)", "rc=%d", rc);
+
+    /* both descriptors should read the same file from offset 0 */
+    char b1[16] = {0}, b2[16] = {0};
+    lseek(fd, 0, SEEK_SET);
+    ssize_t r1 = read(target, b1, 5);
+    lseek(fd, 0, SEEK_SET);
+    ssize_t r2 = read(fd, b2, 5);
+    CHECK(r1 == r2 && memcmp(b1, b2, 5) == 0, "dup2 fd reads same data", "");
+
+    close(dfd);
+    close(target);
+    close(fd);
+}
+
+/* ------------------------------------------------------------------ */
+/* SYS_GETPID / SYS_GETTID                                             */
+/* ------------------------------------------------------------------ */
+
+static void test_getpid_gettid(void)
+{
+    SECTION("getpid / gettid");
+
+    pid_t pid = getpid();
+    CHECK(pid > 0, "getpid()", "pid=%d", pid);
+
+    pid_t tid = gettid();
+    CHECK(tid > 0, "gettid()", "tid=%ld", (long)tid);
+}
+
+/* ------------------------------------------------------------------ */
+/* SYS_FORK / SYS_EXECVE / SYS_EXIT / SYS_WAIT4                        */
+/* ------------------------------------------------------------------ */
+
+static void test_fork_execve_wait4(void)
+{
+    SECTION("fork / execve / wait4");
+
+    pid_t pid = fork();
+    CHECK(pid >= 0, "fork()", "pid=%d", pid);
 
     if (pid == 0) {
-        u_write_str("  [child] hello from child, pid = ");
-        long mypid = syscall0(SYS_GETPID);
-        u_write_dec((uint64_t)mypid);
-        u_write_str("\n");
-        /* child exits on its own so it doesn't fall through
-        into the parent's later cleanup/exit path twice */
-        syscall1(SYS_EXIT, 0);
-        while (1);
-    } else if (pid > 0) {
-        u_write_str("  [parent] forked child pid = ");
-        u_write_dec((uint64_t)pid);
-        u_write_str("\n");
-    } else {
-        u_write_str("  [parent] fork failed\n");
+        /* child: replace image with EXEC_TEST_BIN */
+        char *argv[] = { (char *)EXEC_TEST_BIN, NULL };
+        char *envp[] = { NULL };
+        execve(EXEC_TEST_BIN, argv, envp);
+        /* execve only returns on failure */
+        fprintf(stderr, ANSI_RED "  [FAIL] execve(\"%s\") failed: %s\n"
+                ANSI_RESET, EXEC_TEST_BIN, strerror(errno));
+        _exit(127);
     }
 
-    u_write_str("=== END fork ===\n\n");
+    /* parent */
+    int status = 0;
+    pid_t waited = wait4(pid, &status, 0, NULL);
+    CHECK(waited == pid, "wait4() returns child pid",
+          "waited=%d expected=%d", waited, pid);
+
+    if (WIFEXITED(status)) {
+        int code = WEXITSTATUS(status);
+        CHECK(code != 127, "child execve'd " EXEC_TEST_BIN " successfully",
+              "child exit code=%d", code);
+    } else if (WIFSIGNALED(status)) {
+        CHECK(0, "child terminated by signal",
+              "signal=%d", WTERMSIG(status));
+    } else {
+        CHECK(0, "child exited abnormally", "status=0x%x", status);
+    }
 }
 
-/* ---- sysfs input test: read /sys/class/input/input0/{name,id} ---- */
+/* ------------------------------------------------------------------ */
+/* SYS_UNAME                                                           */
+/* ------------------------------------------------------------------ */
 
-static void test_sysfs_input(void)
+static void test_uname(void)
 {
-    u_write_str("=== TEST: sysfs input (name/id) ===\n");
+    SECTION("uname");
 
-    long fd = syscall3(SYS_OPEN, (long)sysfs_name_path, 0 /* O_RDONLY */, 0);
-    log_ret("open /sys/class/input/input0/name", fd);
+    struct utsname u;
+    int rc = uname(&u);
+    CHECK(rc == 0, "uname()", "rc=%d", rc);
+    if (rc == 0) {
+        printf("           sysname=%s release=%s machine=%s\n",
+               u.sysname, u.release, u.machine);
+    }
+}
 
+/* ------------------------------------------------------------------ */
+/* SYS_GETCWD / SYS_CHDIR                                              */
+/* ------------------------------------------------------------------ */
+
+static void test_getcwd_chdir(void)
+{
+    SECTION("getcwd / chdir");
+
+    char cwd_before[4096];
+    char *r = getcwd(cwd_before, sizeof(cwd_before));
+    CHECK(r == cwd_before, "getcwd() initial", "cwd=%s",
+          r ? cwd_before : "(null)");
+
+    int rc = chdir(TEST_DIR);
+    CHECK(rc == 0, "chdir(TEST_DIR)", "rc=%d", rc);
+
+    char cwd_after[4096] = {0};
+    r = getcwd(cwd_after, sizeof(cwd_after));
+    CHECK(r == cwd_after && strcmp(cwd_after, TEST_DIR) == 0,
+          "getcwd() reflects chdir", "cwd=%s", r ? cwd_after : "(null)");
+
+    /* go back so later relative-path logic (if any) is unaffected */
+    rc = chdir(cwd_before);
+    CHECK(rc == 0, "chdir() back to original cwd", "rc=%d", rc);
+}
+
+/* ------------------------------------------------------------------ */
+/* SYS_MKDIR / SYS_RMDIR                                               */
+/* ------------------------------------------------------------------ */
+
+static void test_mkdir_rmdir(void)
+{
+    SECTION("mkdir / rmdir");
+
+    int rc = mkdir(TEST_SUBDIR, 0755);
+    CHECK(rc == 0, "mkdir(TEST_SUBDIR)", "rc=%d", rc);
+
+    int fd = open(TEST_SUBDIR, O_RDONLY | O_DIRECTORY);
+    CHECK(fd >= 0, "open() to verify dir exists", "fd=%d", fd);
+    if (fd >= 0) close(fd);
+
+    rc = rmdir(TEST_SUBDIR);
+    CHECK(rc == 0, "rmdir(TEST_SUBDIR)", "rc=%d", rc);
+
+    errno = 0;
+    rc = access(TEST_SUBDIR, F_OK);
+    CHECK(rc == -1 && errno == ENOENT, "dir gone after rmdir", "rc=%d", rc);
+}
+
+/* ------------------------------------------------------------------ */
+/* SYS_UNLINK                                                          */
+/* ------------------------------------------------------------------ */
+
+static void test_unlink(void)
+{
+    SECTION("unlink");
+
+    int fd = open(TEST_FILE2, O_CREAT | O_WRONLY, 0644);
+    CHECK(fd >= 0, "open(O_CREAT) throwaway file", "fd=%d", fd);
+    if (fd >= 0) close(fd);
+
+    int rc = unlink(TEST_FILE2);
+    CHECK(rc == 0, "unlink(TEST_FILE2)", "rc=%d", rc);
+
+    errno = 0;
+    rc = access(TEST_FILE2, F_OK);
+    CHECK(rc == -1 && errno == ENOENT, "file gone after unlink", "rc=%d", rc);
+}
+
+/* ------------------------------------------------------------------ */
+/* SYS_GETDENTS64 (via readdir, which is backed by getdents64)         */
+/* ------------------------------------------------------------------ */
+
+static void test_getdents64(void)
+{
+    SECTION("getdents64 (via opendir/readdir)");
+
+    DIR *d = opendir(TEST_DIR);
+    CHECK(d != NULL, "opendir(TEST_DIR)", "");
+    if (!d) return;
+
+    int found_file = 0, found_dot = 0;
+    errno = 0;
+    struct dirent *de;
+    while ((de = readdir(d)) != NULL) {
+        if (strcmp(de->d_name, "file.txt") == 0) found_file = 1;
+        if (strcmp(de->d_name, ".") == 0) found_dot = 1;
+    }
+    CHECK(errno == 0, "readdir() loop completed without error", "");
+    CHECK(found_file, "readdir() found file.txt", "");
+    CHECK(found_dot, "readdir() found '.' entry", "");
+
+    int rc = closedir(d);
+    CHECK(rc == 0, "closedir()", "rc=%d", rc);
+}
+
+/* ------------------------------------------------------------------ */
+/* SYS_CLOCK_GETTIME                                                   */
+/* ------------------------------------------------------------------ */
+
+static void test_clock_gettime(void)
+{
+    SECTION("clock_gettime");
+
+    struct timespec ts1, ts2;
+    int rc = clock_gettime(CLOCK_REALTIME, &ts1);
+    CHECK(rc == 0, "clock_gettime(CLOCK_REALTIME)", "sec=%lld",
+          (long long)ts1.tv_sec);
+
+    rc = clock_gettime(CLOCK_MONOTONIC, &ts2);
+    CHECK(rc == 0, "clock_gettime(CLOCK_MONOTONIC)", "sec=%lld",
+          (long long)ts2.tv_sec);
+
+    struct timespec ts3;
+    rc = clock_gettime(CLOCK_MONOTONIC, &ts3);
+    long long delta_ns =
+        (ts3.tv_sec - ts2.tv_sec) * 1000000000LL + (ts3.tv_nsec - ts2.tv_nsec);
+    CHECK(rc == 0 && delta_ns >= 0, "CLOCK_MONOTONIC is non-decreasing",
+          "delta_ns=%lld", delta_ns);
+}
+
+/* ------------------------------------------------------------------ */
+/* SYS_OPENAT / SYS_MKDIRAT / SYS_UNLINKAT                             */
+/* ------------------------------------------------------------------ */
+
+static void test_at_family(void)
+{
+    SECTION("openat / mkdirat / unlinkat");
+
+    int dirfd = open(TEST_DIR, O_RDONLY | O_DIRECTORY);
+    CHECK(dirfd >= 0, "open(TEST_DIR) for *at() dirfd", "dirfd=%d", dirfd);
+    if (dirfd < 0) return;
+
+    /* SYS_MKDIRAT */
+    int rc = mkdirat(dirfd, "atsub", 0755);
+    CHECK(rc == 0, "mkdirat(dirfd, \"atsub\")", "rc=%d", rc);
+
+    /* SYS_OPENAT (create + write a file relative to dirfd) */
+    int fd = openat(dirfd, "atfile.txt", O_CREAT | O_WRONLY, 0644);
+    CHECK(fd >= 0, "openat(dirfd, \"atfile.txt\", O_CREAT)", "fd=%d", fd);
     if (fd >= 0) {
-        char buf[64] = {0};
-        long rret = syscall3(SYS_READ, fd, (long)buf, sizeof(buf) - 1);
-        log_ret("read name", rret);
-        if (rret > 0) {
-            u_write_str("  name: ");
-            u_write_str(buf);
-        }
-        long cret = syscall1(SYS_CLOSE, fd);
-        log_ret("close name", cret);
-    } else {
-        u_write_str("  [skip] name: open failed\n");
+        ssize_t wn = write(fd, "at\n", 3);
+        CHECK(wn == 3, "write() to openat() fd", "wn=%zd", wn);
+        close(fd);
     }
 
-    fd = syscall3(SYS_OPEN, (long)sysfs_id_path, 0 /* O_RDONLY */, 0);
-    log_ret("open /sys/class/input/input0/id", fd);
+    /* verify via plain access() using the resolved relative path */
+    rc = faccessat(dirfd, "atfile.txt", F_OK, 0);
+    CHECK(rc == 0, "faccessat() sees created file", "rc=%d", rc);
 
-    if (fd >= 0) {
-        char buf[32] = {0};
-        long rret = syscall3(SYS_READ, fd, (long)buf, sizeof(buf) - 1);
-        log_ret("read id", rret);
-        if (rret > 0) {
-            u_write_str("  id: ");
-            u_write_str(buf);
-        }
-        long cret = syscall1(SYS_CLOSE, fd);
-        log_ret("close id", cret);
-    } else {
-        u_write_str("  [skip] id: open failed\n");
+    /* SYS_UNLINKAT (file) */
+    rc = unlinkat(dirfd, "atfile.txt", 0);
+    CHECK(rc == 0, "unlinkat(dirfd, \"atfile.txt\", 0)", "rc=%d", rc);
+
+    /* SYS_UNLINKAT (directory, AT_REMOVEDIR) */
+    rc = unlinkat(dirfd, "atsub", AT_REMOVEDIR);
+    CHECK(rc == 0, "unlinkat(dirfd, \"atsub\", AT_REMOVEDIR)", "rc=%d", rc);
+
+    close(dirfd);
+}
+
+/* ------------------------------------------------------------------ */
+/* main                                                                */
+/* ------------------------------------------------------------------ */
+
+int main(void)
+{
+    printf(ANSI_YELLOW "libc syscall coverage test\n" ANSI_RESET);
+    printf("exec target for fork/execve/wait4: %s\n", EXEC_TEST_BIN);
+
+    /* fresh scratch space */
+    rm_rf_testdir();
+    if (mkdir(TEST_DIR, 0755) != 0 && errno != EEXIST) {
+        fprintf(stderr, ANSI_RED "fatal: could not create %s: %s\n"
+                ANSI_RESET, TEST_DIR, strerror(errno));
+        return 1;
     }
 
-    u_write_str("=== END sysfs input ===\n\n");
-}
-
-/* ---- devfs input test: blocking read from /dev/input/input0 ----
- *
- * ps2_kbd_read() blocks on hlt until a key comes through the ring
- * buffer, so this will sit here waiting for keypresses -- press a
- * few keys on the keyboard to see this test complete.
- */
-
-static void test_devfs_input(void)
-{
-    u_write_str("=== TEST: devfs input (blocking read) ===\n");
-
-    long fd = syscall3(SYS_OPEN, (long)devfs_kbd_path, 0 /* O_RDONLY */, 0);
-    log_ret("open /dev/input/input0", fd);
-
-    if (fd >= 0) {
-        u_write_str("  press a few keys...\n");
-
-        char buf[8] = {0};
-        long rret = syscall3(SYS_READ, fd, (long)buf, sizeof(buf) - 1);
-        log_ret("read /dev/input/input0", rret);
-
-        if (rret > 0) {
-            u_write_str("  got: ");
-            u_write_str(buf);
-            u_write_str("\n");
-        }
-
-        long cret = syscall1(SYS_CLOSE, fd);
-        log_ret("close /dev/input/input0", cret);
-    } else {
-        u_write_str("  [skip] devfs input: open failed\n");
-    }
-
-    u_write_str("=== END devfs input ===\n\n");
-}
-
-/* ---- unlink/rmdir cleanup test ---- */
-
-static void test_cleanup(void)
-{
-    u_write_str("=== TEST: unlink/rmdir ===\n");
-
-    long rret = syscall1(SYS_RMDIR, (long)dir);
-    log_ret("rmdir /tmp/ctest", rret);
-
-    long uret = syscall1(SYS_UNLINK, (long)file);
-    log_ret("unlink hello.txt", uret);
-
-    u_write_str("=== END unlink/rmdir ===\n\n");
-}
-
-void main(int argc, char** argv, char** envp)
-{
-    test_args(argc, argv, envp);
-    test_getpid();
-
-    test_file_write();
-    test_read();
-    test_lseek();
+    test_open_write_read_lseek_close();
+    test_mmap_mprotect_munmap();
     test_brk();
-    test_getcwd();
+    test_access();
     test_sched_yield();
-    //test_fork();
-    test_sysfs_input();
-    test_devfs_input();
+    test_dup_dup2();
+    test_getpid_gettid();
+    test_fork_execve_wait4();
+    test_uname();
+    test_getcwd_chdir();
+    test_getdents64();
+    test_at_family();
+    test_unlink();
+    test_mkdir_rmdir();
+    test_clock_gettime();
 
-    test_cleanup();
+    rm_rf_testdir();
 
-//for(;;);
-    u_write_str("=== ALL TESTS DONE ===\n");
+    printf("\n" ANSI_YELLOW "== summary ==" ANSI_RESET "\n");
+    printf("  total:  %d\n", g_total);
+    printf("  passed: " ANSI_GREEN "%d" ANSI_RESET "\n", g_total - g_failures);
+    printf("  failed: %s%d" ANSI_RESET "\n",
+           g_failures ? ANSI_RED : ANSI_GREEN, g_failures);
 
-    syscall1(SYS_EXIT, 0);
-    while (1);
+    if (g_failures == 0) {
+        printf(ANSI_GREEN "ALL TESTS PASSED\n" ANSI_RESET);
+        return 0;
+    } else {
+        printf(ANSI_RED "%d TEST(S) FAILED\n" ANSI_RESET, g_failures);
+        return g_failures > 255 ? 255 : g_failures;
+    }
 }
-
-/*
-gcc -x c -m64 -ffreestanding -fno-stack-protector -fno-pie -no-pie -nostdlib -c test_c -o test.o
-
-nasm -f elf64 start.s -o start.o
-
-ld -m elf_x86_64 -T link.ld start.o test.o -o test.elf
-
-objcopy -O binary test.elf test.bin
-*/

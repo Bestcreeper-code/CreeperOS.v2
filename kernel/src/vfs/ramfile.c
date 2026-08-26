@@ -1,10 +1,12 @@
 #include "vfs/ramfile.h"
 #include "defines/helpers.h"
+#include "defines/types.h"
 #include "memory/memory.h"
 #include "vfs.h"
 #include "defines/err_codes.h"
 #include "string/string.h"
 #include "memops.h"
+#include "syscalls/syscall.h"
 #include "vfs/fs.h"
 
 #include <stddef.h>
@@ -15,14 +17,16 @@ struct file_operations ram_file_fops= {
     .read = ramfile_read,
     .write = ramfile_write,
     .release = ramfile_release,
+
+    .lseek= ramfile_lseek,
 };
 
 struct inode_operations ram_dir_iops = {
     .lookup = vfs_lookup,
 
     .create = ramfile_inode_create,
-    .mkdir  = ramfile_inode_mkdir,
-    .rmdir  = ramfile_inode_rmdir,
+    .mkdir = ramfile_inode_mkdir,
+    .rmdir = ramfile_inode_rmdir,
     .unlink = ramfile_inode_unlink,
 };
 
@@ -114,6 +118,24 @@ ssize_t ramfile_write(struct file* file, const char* buf, size_t count, loff_t* 
 
     *offset += count;
     return count;
+}
+
+loff_t ramfile_lseek(struct file* fil, loff_t offset, int origin) {
+    switch (origin) {
+        case SEEK_SET:
+            fil->f_pos = offset;
+            return offset;
+            
+        case SEEK_CUR:
+            fil->f_pos += offset;
+            return fil->f_pos;
+            
+        case SEEK_END:
+            fil->f_pos = fil->f_inode->i_size + offset;
+            return fil->f_pos;
+        
+        default: return -E_INVAL;
+    }
 }
 
 int ramfile_release(struct inode* inode, struct file* file)

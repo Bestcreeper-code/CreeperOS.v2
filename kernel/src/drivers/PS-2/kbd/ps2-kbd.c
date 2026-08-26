@@ -1,3 +1,4 @@
+#include "cpu/cpu.h"
 #include "debug/Logger.h"
 #include "arch/interrupts.h"
 #include "arch/x86_64/cpu/idt.h"
@@ -221,8 +222,10 @@ void ps2_keyboard_handler(void* frame) {
         // Sys_log_NoPos("%c",ch);
     }
 
-    if(ch=='l') _log_all_processes();
+    if(ch=='l') _log_process_tree();
+    if(ch=='L') _log_all_processes();
     if(ch=='t') fs_tree(root_dentry, 0);
+    if(ch=='c') cpu_log_specs();
     if(ch=='m') {
         char buff[100];
         byte_nb_simplify(pmm_get_total_pages() - pmm_get_free_pages(), buff, 4);
@@ -245,7 +248,6 @@ int ps2_kbd_read(struct input_device *dev, void *buf, size_t count, loff_t offse
     while (bytes_read < count) {
         unsigned char ch = 0;
         while (ch == 0) {
-            // __asm__ __volatile__(" hlt");
             if (buf_head != buf_tail) {
                 ch = input_char_buffer[buf_head];
                 buf_head = (buf_head + 1) % INPUT_CHAR_BUFFER_SIZE;
@@ -262,7 +264,7 @@ int ps2_kbd_read(struct input_device *dev, void *buf, size_t count, loff_t offse
 struct input_device_ops ps2_kbd_ops = {
     .read  = ps2_kbd_read,
     .write = vfs_inv_func,
-    .ioctl = (int (*)(struct input_device *, int, ...))vfs_inv_func
+    .ioctl = (void*)vfs_inv_func
 };
 
 int ps2_kbd_init() {

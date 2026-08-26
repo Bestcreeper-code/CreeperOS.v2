@@ -90,7 +90,7 @@ typedef struct file {
 
 _Static_assert(sizeof(file) ==64, "size must be 64 bits");
 
-
+// #error change to seek on all inode isnetad fo glob+change thread model
 struct file_operations {
     // struct module *owner; later waybe but commented out to remember
     int (*open) (struct inode*, struct file*);
@@ -98,11 +98,13 @@ struct file_operations {
 	ssize_t (*write) (struct file*, const char*, size_t, loff_t*);
     int (*release) (struct inode*, struct file*);
 
+    loff_t (*lseek) (struct file*, loff_t, int);
+
     int (*ioctl)(struct file*, int op, unsigned long);
 };
 
 struct inode_operations{
-    struct dentry *(*lookup)(struct inode *, struct dentry *, unsigned int);
+    struct dentry* (*lookup)(struct inode *, struct dentry *, unsigned int);
     int (*mkdir)(struct inode *, struct dentry *, umode_t);
     int (*rmdir)(struct inode *, struct dentry *);
     int (*create)(struct inode *, struct dentry *, umode_t, bool);
@@ -122,8 +124,8 @@ struct vfsmount {
 };
 
 struct mount {
-    struct mount *mnt_parent;
-    struct dentry *mnt_mountpoint;
+    struct mount* mnt_parent;
+    struct dentry* mnt_mountpoint;
     struct vfsmount mnt;
     struct list_head mnt_mounts;
     struct list_head mnt_child;
@@ -132,7 +134,7 @@ struct mount {
 
 
 struct inode {
-    struct dentry *i_dentry;  
+    struct dentry* i_dentry;  
     // info
     umode_t    i_mode;
     kuid_t     i_uid;

@@ -110,32 +110,35 @@ static bool _exec_setup_user_args(uint64_t* new_pml4, char** argv, char** envp,
     return true;
 }
 
-int exec_elf_from_vfs(linked_pcb* proc, const char* vfs_path,
+int exec_elf_from_vfs(tcb_t* thread, const char* vfs_path,
                        char** argv, char** envp, uint64_t rsp)
 {
-    if (!proc || !proc->cr3 || proc->cr3 == kernel_pagedir_phys)
+    if (!thread || !thread->process)
+        return -E_INVAL;
+
+    pcb_t* proc = thread->process;
+
+    if (!proc->cr3 || proc->cr3 == kernel_pagedir_phys)
         return -E_INVAL;
 
     if (!rsp)
         return -E_INVAL;
-    Sys_Info("%lx \n",pmm_get_free_pages());
-    
+    Sys_Info("%lx \n", pmm_get_free_pages());
+
     process_stack_frame* frame = (process_stack_frame*)rsp;
-    
+
     dentry* dent = kpath_lookup(root_dentry->inode, vfs_path);
     RET_IF(!dent, -E_NOENT);
-    
+
     size_t image_size = dent->inode->i_size;
     size_t raw_pages = (image_size + PAGE_SIZE_4K - 1) / PAGE_SIZE_4K;
     if (raw_pages == 0) raw_pages = 1;
-    
-    Sys_Info("asking for %lx pages for exec \n",raw_pages);
-    physptr_t raw_image = pmm_alloc_pages(raw_pages);
-    if(!raw_image){
-        
-        return -E_NOMEM;
-    } 
 
+    Sys_Info("asking for %lx pages for exec \n", raw_pages);
+    physptr_t raw_image = pmm_alloc_pages(raw_pages);
+    if (!raw_image) {
+        return -E_NOMEM;
+    }
 
     file f = {0};
     int ret = dent->inode->i_fop->open(dent->inode, &f);
@@ -165,8 +168,6 @@ int exec_elf_from_vfs(linked_pcb* proc, const char* vfs_path,
               vfs_path, (void*)ehdr->e_entry, ehdr->e_phnum);
 #endif
 
-    // build the new address space fully before touching the old one
-
     physptr_t new_pml4_phys = pmm_alloc_pages_zeroed(1);
     if (!new_pml4_phys) {
 #if EXEC_DEBUG
@@ -178,10 +179,9 @@ int exec_elf_from_vfs(linked_pcb* proc, const char* vfs_path,
     uint64_t* new_pml4 = PHYS_2_HHDM(new_pml4_phys);
     uint64_t* old_pml4 = PHYS_2_HHDM(proc->cr3);
 
-    for (int i = 255; i < 512; i++)
+    for (int i = 256; i < 512; i++)
         new_pml4[i] = ((uint64_t*)PHYS_2_HHDM(kernel_pagedir_phys))[i];
 
-    
     physptr_t ft_phys = 0;
     if (proc->opened_file_table) {
         bool owned = false;
@@ -198,7 +198,6 @@ int exec_elf_from_vfs(linked_pcb* proc, const char* vfs_path,
                      PTE_WRITABLE | PTE_LOCAL_OWNED);
     }
 
-    //map PT_LOAD segments
     elf64_phdr* phdrs = (elf64_phdr*)(raw + ehdr->e_phoff);
     bool load_failed = false;
 
@@ -216,7 +215,7 @@ int exec_elf_from_vfs(linked_pcb* proc, const char* vfs_path,
         if (!seg_phys) {
 #if EXEC_DEBUG
             Sys_Error("execve: failed to allocate PT_LOAD %u (%zu pages)\n",
-                        i, seg_pages);
+                      i, seg_pages);
 #endif
             load_failed = true;
             break;
@@ -242,7 +241,7 @@ int exec_elf_from_vfs(linked_pcb* proc, const char* vfs_path,
 
     pmm_free_pages(raw_image, raw_pages);
 
-    //new user stack
+    // new user stack -- belongs to the thread, not the process
     page_index us_stack_pages = pmm_alloc_pages(DEFAULT_STACK_PAGE_AMOUNT);
     if (!us_stack_pages) {
 #if EXEC_DEBUG
@@ -259,24 +258,25 @@ int exec_elf_from_vfs(linked_pcb* proc, const char* vfs_path,
                page_addr, PTE_WRITABLE | PTE_NX | PTE_USER | PTE_LOCAL_OWNED);
     }
 
-    //new heap
     physptr_t heap_pages = pmm_alloc_pages(DEFAULT_USER_HEAP_PAGES);
     if (!heap_pages) {
 #if EXEC_DEBUG
         Sys_Error("execve: failed allocating heap\n");
 #endif
+        pmm_free_pages(us_stack_pages, DEFAULT_STACK_PAGE_AMOUNT);
         vmm_pagetable_free_owned(new_pml4_phys);
         return -E_NOMEM;
     }
     map_4k_pages(new_pml4, DEFAULT_USER_HEAP_START, heap_pages,
                  DEFAULT_USER_HEAP_PAGES, PTE_USER | PTE_WRITABLE | PTE_LOCAL_OWNED);
 
-    //argv/envp
     uint64_t u_argc = 0, u_argv = 0, u_envp = 0;
     if (!_exec_setup_user_args(new_pml4, argv, envp, &u_argc, &u_argv, &u_envp)) {
 #if EXEC_DEBUG
         Sys_Error("execve: failed setting up argv/envp\n");
-#endif    
+#endif
+        pmm_free_pages(heap_pages, DEFAULT_USER_HEAP_PAGES);
+        pmm_free_pages(us_stack_pages, DEFAULT_STACK_PAGE_AMOUNT);
         vmm_pagetable_free_owned(new_pml4_phys);
         return -E_NOMEM;
     }
@@ -286,28 +286,24 @@ int exec_elf_from_vfs(linked_pcb* proc, const char* vfs_path,
               (void*)new_pml4_phys, (void*)ehdr->e_entry);
 #endif
 
-
     if (proc->opened_file_table) {
-        
         for (int i = 0; i < DEFAULT_FILE_TABLE_PAGES; i++)
             vmm_unmap_page(ADDR_TO_PAGE(DEFAULT_FILE_TABLE_START) + i);
     }
 
     physptr_t old_pml4_phys = proc->cr3;
-
-    
     vmm_pagetable_free_owned(old_pml4_phys);
 
-    proc->cr3 = new_pml4_phys;
-    proc->heap.lower  = DEFAULT_USER_HEAP_START;
-    proc->heap.higher = DEFAULT_USER_HEAP_END;
-    proc->heap.size   = DEFAULT_USER_HEAP_PAGES * PAGE_SIZE_4K;
-    proc->user_stack  = (stack_t){
+    proc->cr3          = new_pml4_phys;
+    proc->heap.lower   = DEFAULT_USER_HEAP_START;
+    proc->heap.higher  = DEFAULT_USER_HEAP_END;
+    proc->heap.size    = DEFAULT_USER_HEAP_PAGES * PAGE_SIZE_4K;
+
+    thread->user_stack = (stack_t){
         .bottom = us_stack_bott,
         .top    = us_stack_bott + DEFAULT_STACK_PAGE_BYTES,
         .size   = DEFAULT_STACK_PAGE_BYTES
     };
-    
 
     char* old_name = proc->name;
     proc->name = strdup(vfs_path);
@@ -315,7 +311,6 @@ int exec_elf_from_vfs(linked_pcb* proc, const char* vfs_path,
 
     __asm__ volatile ("mov %0, %%cr3" :: "r"(proc->cr3) : "memory");
 
-    
     frame->r15 = frame->r14 = frame->r13 = frame->r12 = 0;
     frame->r11 = frame->r10 = frame->r9  = frame->r8  = 0;
     frame->rbp = frame->rbx = frame->rcx = frame->rax = 0;
@@ -327,7 +322,6 @@ int exec_elf_from_vfs(linked_pcb* proc, const char* vfs_path,
     frame->rip    = ehdr->e_entry;
     frame->rflags = 0x202;
     frame->rsp    = STACK_UPPER_USPACE_ADDR;
-
 
     Sys_Success("execve: pid %u now running '%s'\n", proc->pid, vfs_path);
 

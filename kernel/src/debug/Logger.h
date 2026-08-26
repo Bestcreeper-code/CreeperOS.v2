@@ -46,7 +46,8 @@
 
 
 #define Sys_Breakpoint() Sys_log("Breakpoint hit at %s:%d\n", __FILE_NAME__, __LINE__); asm volatile("int3")
-#define Sys_Step_Point() Sys_log("Step Point hit at %s:%d\n", __FILE_NAME__, __LINE__); getc()
+
+extern volatile bool klogger_is_threaded;
 
 void serial_init();
 

@@ -33,6 +33,7 @@
 
 #define SYS_EXECVE 59
 #define SYS_EXIT 60
+#define SYS_WAIT4 61
 
 #define SYS_UNAME 63
 
@@ -46,6 +47,8 @@
 #define SYS_UNLINK 87
 
 #define SYS_ARCH_PRCTL 158
+
+#define SYS_GETTID 186
 
 #define SYS_GETDENTS64 217
 #define SYS_CLOCK_GETTIME 228
@@ -137,6 +140,18 @@ void sys_exit(
     register_t rsp
 );
 
+struct rusage{
+    int bs;
+};
+#define WNOHANG 1
+pid_t sys_wait4(
+    pid_t pid,
+    __user int* wstatus,
+    int options,
+    __user struct rusage* rusage,
+    register_t rsp
+);
+
 struct utsname {
     char sysname[65];
     char nodename[65];
@@ -195,6 +210,8 @@ long sys_arch_prctl(
     int code,
     unsigned long* addr
 );
+
+long sys_gettid();
 
 ssize_t sys_getdents64(
     unsigned int fd,

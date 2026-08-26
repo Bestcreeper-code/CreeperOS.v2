@@ -9,6 +9,7 @@
 #include "defines/err_codes.h"
 #include "string/string.h"
 #include "memops.h"
+#include "vfs/chardev/chardev.h"
 #include "vfs/fs.h"
 
 #include <stddef.h>
@@ -81,6 +82,8 @@ struct file_operations devnull_fops = {
     .read = devnull_read,
     .write = devfs_discard_write,
     .release = devfs_release,
+
+    .lseek = chardev_lseek,
 };
 
 
@@ -103,6 +106,8 @@ struct file_operations devzero_fops = {
     .read = devzero_read,
     .write = devfs_discard_write,
     .release = devfs_release,
+
+    .lseek = chardev_lseek,
 };
 
 
@@ -119,6 +124,8 @@ struct file_operations devfull_fops = {
     .read = devzero_read,
     .write = devfull_write,
     .release = devfs_release,
+
+    .lseek = chardev_lseek,
 };
 
 
@@ -149,6 +156,8 @@ struct file_operations devrandom_fops = {
     .read = devrandom_read,
     .write = devfs_discard_write,
     .release = devfs_release,
+
+    .lseek = chardev_lseek,
 };
 
 
@@ -176,6 +185,8 @@ struct file_operations devmem_fops = {
     .read = devmem_read,
     .write = devmem_write,
     .release = devfs_release,
+
+    .lseek = chardev_lseek,
 };
  
 
@@ -211,6 +222,8 @@ struct file_operations devport_fops = {
     .read = devport_read,
     .write = devport_write,
     .release = devfs_release,
+
+    .lseek = chardev_lseek,
 };
 
 //dev/tty
@@ -232,10 +245,12 @@ static ssize_t devtty_read(struct file* file, char* buf, size_t count, loff_t* o
 }
 
 struct file_operations devtty_fops = {
-    .open    = devfs_open,
-    .read    = devtty_read,
-    .write   = devtty_write,
+    .open = devfs_open,
+    .read = devtty_read,
+    .write = devtty_write,
     .release = devfs_release,
+
+    .lseek = chardev_lseek,
 };
 
 
@@ -334,10 +349,12 @@ static ssize_t devfs_indev_write(struct file* file, const char* buf, size_t coun
 }
 
 struct file_operations devfs_indev_fops = {
-    .open    = devfs_indev_open,
-    .read    = devfs_indev_read,
-    .write   = devfs_indev_write,
+    .open = devfs_indev_open,
+    .read = devfs_indev_read,
+    .write = devfs_indev_write,
     .release = devfs_release,
+
+    .lseek = chardev_lseek,
 };
 
 

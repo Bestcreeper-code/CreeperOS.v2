@@ -13,6 +13,7 @@
 #include "defines/types.h"
 #include "defines/err_codes.h"
 #include <stddef.h>
+#include "syscalls/syscall.h"
 
 static struct file_system_type *fs_registry = NULL;
 
@@ -229,4 +230,21 @@ ssize_t vfs_getdents64(struct file* file, char* buf, size_t count)
 
     file->f_pos = idx;
     return (ssize_t)bpos;
+}
+
+loff_t vfs_seek(file* fil, loff_t offset, int origin) {
+    switch (origin) {
+        case SEEK_SET:
+            fil->f_pos = offset;
+            return offset;
+            
+        case SEEK_CUR:
+            fil->f_pos += offset;
+            return fil->f_pos;
+            
+        case SEEK_END:
+            fil->f_pos = fil->f_inode->i_size + offset;
+            return fil->f_pos;
+            
+    }
 }

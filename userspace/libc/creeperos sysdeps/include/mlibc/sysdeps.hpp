@@ -35,7 +35,10 @@ struct CreeperOsSysdepTags :
 	Dup,Dup2,
 	Fork,
 	Execve,
-	Uname
+	Uname,
+	GetTid,
+	Waitpid,
+	Chdir
 {};
 
 template<typename Tag>
