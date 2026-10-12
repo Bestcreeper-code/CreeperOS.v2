@@ -6,10 +6,9 @@
 // #include "kernel_data.h"
 
 
-#define MULTIBOOT_MMAP_FREE_MEMORY  1
-#define MULTIBOOT_MMAP_RESERVED     2
 
-#define MAX_FREE_REGIONS 1024
+
+#define MAX_FREE_REGIONS 102
 
 
 #define KERNEL_HEAP_SEED_PAGES 4

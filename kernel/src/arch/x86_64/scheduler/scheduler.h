@@ -83,6 +83,7 @@ typedef struct pcb {
     heap_t heap;
     
     uintptr_t opened_file_table;
+    physptr_t opened_file_table_phys;
     struct inode* cwd_i;
     
     kuid_t uid;

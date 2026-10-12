@@ -5,6 +5,7 @@
 #include "debug/Logger.h"
 #include "printf/printf.h"
 #include "scheduler/scheduler.h"
+#include "cpu/gdt.h"
 #include "timer/time.h"
 #include "asm/asm.h"
 #include <stddef.h>
@@ -161,27 +162,30 @@ void log_isr_error_code(unsigned char isr_idx, uint64_t code){
 
 
 
-volatile char panic_count = 0;
+volatile char panic_count = DISABLE_ISR_BACKTRACE;
 void _panic_handler(uint64_t isr_index, uint64_t err_code, cpu_registers_t* regs, uint64_t* call_stack) {
-
-    klogger_is_threaded=false;
-    
+cli();
+    usproc_exit(current_process, 139);//hardcoded segfault rn
+    // klogger_is_threaded=false;
     if (panic_count >= MAX_KPANIK_COUNT) {
-        Sys_Fatal("Double Fault (%lx) %lx\n", isr_index, regs->cr2);
+        Sys_Fatal("Double Fault (%ld) %#lx\n", isr_index, regs->cr2);
         Sys_Info("Fix your shit\n");
-        for (;;);
+        // for (;;);
     }
     
     panic_count++;
     
     // task_switching_flag = false;
-    
+    if (isr_index == 14) {//page fault
+        handle_page_fault(regs, call_stack);
+    }
 
 
-    Sys_log("Kernel panic (%lu | %lx | CR2:0x%lx)\n",
+    Sys_log("Kernel panic (%lu | %#lx | CR2:%#lx)\n",
         (uint64_t)isr_index,
         (uint64_t)err_code,
-        (uint64_t)regs->cr2);
+        (uint64_t)regs->cr2
+    );
 
     
 
@@ -195,12 +199,13 @@ void _panic_handler(uint64_t isr_index, uint64_t err_code, cpu_registers_t* regs
             : "Unknown Crash";
     Sys_log_NoPos(ESC_RED);
     Sys_log_NoPos("=======================================================================\n");
-    Sys_log_NoPos("PANIK -> ISR Index: %lu (%s), Error Code: %lx\n",
+    Sys_log_NoPos("PANIK -> ISR Index: %lu (%s), Error Code: %#lx\n",
         isr_index, error_name, err_code);
 
     Sys_log_NoPos(" A critical error has occurred");
     if(current_process && current_process->name) 
         Sys_log_NoPos(" in process %s (pid: %d)", current_process->name, current_process->pid);
+        Sys_log_NoPos(" in thread %d", current_thread->tid);
     Sys_log_NoPos(":\n");
 
     Sys_log_NoPos(" Error Code: %s (%03ld: %lx)\n",
@@ -248,10 +253,11 @@ void _panic_handler(uint64_t isr_index, uint64_t err_code, cpu_registers_t* regs
     Sys_log_NoPos(" CR4: 0x%016lx  CR8: 0x%016lx\n", 
         regs->cr4, regs->cr8);
 
-
-        void dump_userspace_mappings(uint64_t* pml4);
-        dump_userspace_mappings(PHYS_2_HHDM(regs->cr3));
-    asm volatile("sti");
+    if (panic_count >= MAX_KPANIK_COUNT)for(;;);
+    sti();
+    void dump_userspace_mappings(uint64_t* pml4);
+    dump_userspace_mappings(PHYS_2_HHDM(regs->cr3));
+    
     if (call_stack) {
         Sys_log_NoPos(" Call Stack Trace:\n");
         for (int i = 0; i < MAX_STACK_TRACE_SIZE; i++) {
@@ -289,3 +295,20 @@ void _manual_panic(const char* error, const char* info) {
     // pc_reboot();
 }
 
+
+
+void handle_page_fault(cpu_registers_t* regs, size_t* call_stack) {
+    uint64_t fault_addr = regs->cr2;
+    
+    if(fault_addr >= PAGE_SIZE_4K) {
+        Sys_Error("Page fault from process %d at address 0x%lx", 
+            current_process->pid, fault_addr);
+    } else {
+        Sys_Error("Null pointer dereference from process %d");
+    }
+    usproc_exit(current_process, 139);//hardcoded segfault rn
+    sti();
+    yield_core(regs->rsp);
+    for(;;) {}
+        
+}

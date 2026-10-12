@@ -25,7 +25,7 @@ int sysfs_register_block(struct block_device* blkdev) {
     RET_IF(!blkdev, -E_INVAL);
 
     char dir[64];
-    sprintf(dir, "/sys/class/block/%d", blkdev->name);
+    sprintf(dir, "/sys/class/block/%s", blkdev->name);
 
     int res = kpath_mkdir(root_dentry->inode, dir, 0755);
     RET_IF(res < 0, res);

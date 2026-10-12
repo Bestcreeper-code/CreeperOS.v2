@@ -132,11 +132,17 @@ void sys_serial_vlogf(const char* format, const char* file,
         return;
     }
 
-    uint32_t idx = atomic_fetch_add_explicit(&log_ring_queue_write_idx, 1, memory_order_relaxed)
-        % LOG_RING_QUEUE_SIZE;
+    uint32_t idx = atomic_fetch_add_explicit(
+        &log_ring_queue_write_idx,
+        1,
+        memory_order_relaxed
+    ) % LOG_RING_QUEUE_SIZE;
+    
     log_slot_t *slot = &log_ring_queue[idx];
-    if (atomic_load_explicit(&slot->ready, memory_order_acquire)) {
-        return;
+    
+    
+    while (atomic_load_explicit(&slot->ready, memory_order_acquire)) {
+        _yield();
     }
 
     int n;

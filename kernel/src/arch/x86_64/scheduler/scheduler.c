@@ -100,55 +100,6 @@ void* id_lookup(uint16_t id, id_kind_t* kind_out) {
 
 
 
-
-
-#define SCHED_LOG_INTERVAL 2000U
-
-void _log_all_processes(void) {
-    Sys_log("process list\n");
-    Sys_log("-----------------------------------------------------------------------------------------------\n");
-
-    struct hlist_node* pn = _scheduler_processes_list_head.first;
-    while (pn) {
-        pcb_t* p = container_of(pn, pcb_t, proclist_node);
-
-        Sys_Info(
-            "pid=%u name=%s cr3=0x%016llx heap=[0x%016llx-0x%016llx] "
-            "files=%p cwd=%p\n",
-            (unsigned)p->pid,
-            p->name ? p->name : "(null)",
-            (unsigned long long)p->cr3,
-            (unsigned long long)p->heap.lower,
-            (unsigned long long)p->heap.higher,
-            (void*)p->opened_file_table,
-            (void*)p->cwd_i
-        );
-
-        struct hlist_node* tn = p->threads.first;
-        while (tn) {
-            tcb_t* t = container_of(tn, tcb_t, proc_list_node);
-            Sys_Info(
-                "  tid=%u state=0x%04x k_rsp=0x%016llx "
-                "kstack=[0x%016llx-0x%016llx] ustack=[0x%016llx-0x%016llx] "
-                "exit=%d\n",
-                (unsigned)t->tid,
-                (unsigned)t->state,
-                (unsigned long long)t->k_rsp,
-                (unsigned long long)t->kernel_stack.bottom,
-                (unsigned long long)t->kernel_stack.top,
-                (unsigned long long)t->user_stack.bottom,
-                (unsigned long long)t->user_stack.top,
-                t->exit_code
-            );
-            tn = tn->next;
-        }
-
-        pn = pn->next;
-    }
-
-    Sys_log("-----------------------------------------------------------------------------------------------\n\n");
-}
-
 const char* _tcb_state_str(uint16_t state) {
     if (state & TCB_STATE_DEAD)     return "DEAD";
     if (state & TCB_STATE_ZOMBIE)        return "ZOMBIE";
@@ -157,7 +108,61 @@ const char* _tcb_state_str(uint16_t state) {
     return "UNKNOWN";
 }
 
-void _log_process_tree() {
+
+#define SCHED_LOG_INTERVAL 2000U
+
+static void _log_process_tree_recursive(pcb_t* p, const char* prefix, bool is_last) {
+    Sys_log("%s%s%s (pid=%u)\n",
+            prefix,
+            is_last ? "\\-" : "|-",
+            p->name ? p->name : "(null)",
+            (unsigned)p->pid);
+
+    struct hlist_node* tn = p->threads.first;
+    while (tn) {
+        tcb_t* t = container_of(tn, tcb_t, proc_list_node);
+        bool thread_is_last = (tn->next == NULL);
+
+        Sys_log("%s%s  %s tid=%u [%s]\n",
+                prefix,
+                is_last ? "   " : "|  ",
+                thread_is_last ? "\\-" : "|-",
+                (unsigned)t->tid,
+                _tcb_state_str(t->state));
+
+        tn = tn->next;
+    }
+
+    struct hlist_node* cn = p->childs.first;
+    while (cn) {
+        pcb_t* child = container_of(cn, pcb_t, siblings_list_node);
+        bool child_is_last = (cn->next == NULL);
+
+        _log_process_tree_recursive(
+            child,
+            // Keep the indentation aligned with the process tree
+            ({
+                static char child_prefix[256];
+                size_t len = strlen(prefix);
+
+                if (len >= sizeof(child_prefix) - 4)
+                    len = sizeof(child_prefix) - 4;
+
+                memcpy(child_prefix, prefix, len);
+                child_prefix[len++] = is_last ? ' ' : '|';
+                child_prefix[len++] = ' ';
+                child_prefix[len] = '\0';
+
+                child_prefix;
+            }),
+            child_is_last
+        );
+
+        cn = cn->next;
+    }
+}
+
+void _log_all_processes() {
     Sys_log("process tree\n");
     Sys_log("-----------------------------------------------------------------------------------------------\n");
 
@@ -165,19 +170,11 @@ void _log_process_tree() {
     while (pn) {
         pcb_t* p = container_of(pn, pcb_t, proclist_node);
 
-        Sys_log("%s (pid=%u)\n", p->name ? p->name : "(null)", (unsigned)p->pid);
+        // Only print root processes here; children are printed recursively
+        if (p->parent == NULL) {
+            bool is_last = (pn->next == NULL);
 
-        struct hlist_node* tn = p->threads.first;
-        while (tn) {
-            tcb_t* t = container_of(tn, tcb_t, proc_list_node);
-            bool is_last = (tn->next == NULL);
-
-            Sys_log("  %s tid=%u [%s]\n",
-                    is_last ? "\\-" : "|-",
-                    (unsigned)t->tid,
-                    _tcb_state_str(t->state));
-
-            tn = tn->next;
+            _log_process_tree_recursive(p, "", is_last);
         }
 
         pn = pn->next;
@@ -313,8 +310,10 @@ int scheduler_init() {
     current_process = kernel_proc;
 
     enable_scheduler();
-// #fix teh damn reaper killing himself since ktask are shit now smh
+
+#if !DISABLE_REAPER_KTHREAD    
     Sys_Debug("reaper tid = %04d", ktask_start(reaper_ktask, "reaper")->tid);
+#endif
 
     Sys_Success("Scheduler Inited\n");
     return 0;
@@ -468,7 +467,7 @@ pcb_t* new_usproc(pcb_t* parent, void* entry, char* name, physptr_t page_dir,
 
     uint64_t* p_dir = PHYS_2_HHDM(page_dir);
 
-    // kernel space
+    // map kernel space
     for (int i = 256; i < 512; i++)
         p_dir[i] = ((uint64_t*)PHYS_2_HHDM(kernel_pagedir_phys))[i];
 
@@ -494,7 +493,7 @@ pcb_t* new_usproc(pcb_t* parent, void* entry, char* name, physptr_t page_dir,
     proc->uid  = 0;
     proc->gid  = 0;
     proc->threads.first = NULL;
-    proc->parent = parent;          // NULL is valid: e.g. init/root has no parent
+    proc->parent = parent;          // NULL is valid: init/root has no parent
     proc->childs.first = NULL;
     
 
@@ -530,9 +529,10 @@ pcb_t* new_usproc(pcb_t* parent, void* entry, char* name, physptr_t page_dir,
     map_4k_pages(
         p_dir,
         DEFAULT_FILE_TABLE_START, ft_pages,
-        DEFAULT_FILE_TABLE_PAGES, PTE_WRITABLE | PTE_LOCAL_OWNED
+        DEFAULT_FILE_TABLE_PAGES, PTE_WRITABLE | PTE_LOCAL_OWNED 
     );
 
+    proc->opened_file_table_phys = ft_pages;
     proc->opened_file_table = DEFAULT_FILE_TABLE_START;
     proc->cwd_i = NULL;
 
@@ -980,4 +980,173 @@ void _kernel_yield();
 
 void _yield() {
     _kernel_yield();
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+//debug 
+
+
+
+
+#define PROC_LOG_BUF_SIZE   4096
+#define STACK_DUMP_BYTES 256
+
+static void _append_stack_hexdump(char* buf, size_t* off, size_t cap,
+                                   const char* label, uintptr_t start_vaddr) {
+    int n = sprintf_(buf + *off, "    %s @ 0x%016llx:\n",
+                      label, (unsigned long long)start_vaddr);
+    if (n > 0) *off += (size_t)n;
+
+    uint64_t* words = (uint64_t*)start_vaddr;
+    int rows = (STACK_DUMP_BYTES / 8) / 4;
+
+    for (int row = 0; row < rows; row++) {
+        if (*off + 128 >= cap) return; /* safety margin, caller should have flushed */
+
+        n = sprintf_(buf + *off, "      0x%016llx:",
+                      (unsigned long long)(start_vaddr + row * 32));
+        if (n > 0) *off += (size_t)n;
+
+        for (int col = 0; col < 4; col++) {
+            n = sprintf_(buf + *off, " %016llx",
+                          (unsigned long long)words[row * 4 + col]);
+            if (n > 0) *off += (size_t)n;
+        }
+
+        n = sprintf_(buf + *off, "\n");
+        if (n > 0) *off += (size_t)n;
+    }
+}
+
+void log_process_full(pcb_t* proc) {
+    if (!proc) return;
+
+    static char buf[PROC_LOG_BUF_SIZE];
+    size_t off = 0;
+    int n;
+
+    cli();
+    acquire_lock(&scheduler_lock, SCHED_LOCK_BIT);
+
+    n = sprintf_(buf + off,
+        "=================================================================================================\n"
+        "PROCESS DUMP: pid=%u name=%s state=0x%04x exit_code=%d uid=%u gid=%u\n"
+        "  parent=%p (pid=%d)\n"
+        "  cr3=0x%016llx\n"
+        "  heap:   lower=0x%016llx higher=0x%016llx size=0x%016llx\n"
+        "  files:  opened_file_table=0x%016llx cwd_i=%p\n"
+        "  threads_head=%p  children_head=%p\n",
+        (unsigned)proc->pid,
+        proc->name ? proc->name : "(null)",
+        (unsigned)proc->state,
+        proc->exit_code,
+        (unsigned)proc->uid,
+        (unsigned)proc->gid,
+        (void*)proc->parent,
+        proc->parent ? (int)proc->parent->pid : -1,
+        (unsigned long long)proc->cr3,
+        (unsigned long long)proc->heap.lower,
+        (unsigned long long)proc->heap.higher,
+        (unsigned long long)proc->heap.size,
+        (unsigned long long)proc->opened_file_table,
+        (void*)proc->cwd_i,
+        (void*)proc->threads.first,
+        (void*)proc->childs.first);
+    if (n > 0) off += (size_t)n;
+
+    int tcount = 0;
+    struct hlist_node* tn = proc->threads.first;
+
+    while (tn) {
+        tcb_t* t = container_of(tn, tcb_t, proc_list_node);
+        tcount++;
+
+        n = sprintf_(buf + off,
+            "-------------------------------------------------------------------------------------------\n"
+            "  THREAD tid=%u state=0x%04x (%s) exit_code=%d\n"
+            "    k_rsp=0x%016llx\n"
+            "    kernel_stack: top=0x%016llx bottom=0x%016llx size=0x%016llx\n"
+            "    user_stack:   top=0x%016llx bottom=0x%016llx size=0x%016llx\n"
+            "    fs_base=0x%016llx gs_base=0x%016llx\n",
+            (unsigned)t->tid,
+            (unsigned)t->state,
+            _tcb_state_str(t->state),
+            t->exit_code,
+            (unsigned long long)t->k_rsp,
+            (unsigned long long)t->kernel_stack.top,
+            (unsigned long long)t->kernel_stack.bottom,
+            (unsigned long long)t->kernel_stack.size,
+            (unsigned long long)t->user_stack.top,
+            (unsigned long long)t->user_stack.bottom,
+            (unsigned long long)t->user_stack.size,
+            (unsigned long long)t->fs_base,
+            (unsigned long long)t->gs_base);
+        if (n > 0) off += (size_t)n;
+
+        n = sprintf_(buf + off, "    fp_state[0:32]:");
+        if (n > 0) off += (size_t)n;
+        uint8_t* fp = (uint8_t*)t->fp_state;
+        for (int i = 0; i < 32; i++) {
+            n = sprintf_(buf + off, " %02x", fp[i]);
+            if (n > 0) off += (size_t)n;
+        }
+        n = sprintf_(buf + off, "\n");
+        if (n > 0) off += (size_t)n;
+
+        if (off + 1024 >= PROC_LOG_BUF_SIZE) { serial_write_string(buf); off = 0; }
+
+        if (t->k_rsp)
+            _append_stack_hexdump(buf, &off, PROC_LOG_BUF_SIZE,
+                                   "kernel stack (from k_rsp)", t->k_rsp);
+
+        if (t->user_stack.top) {
+            uintptr_t user_stack_kva = (uintptr_t)PHYS_2_HHDM(t->user_stack.top);
+            _append_stack_hexdump(buf, &off, PROC_LOG_BUF_SIZE,
+                                   "user stack (phys, HHDM view)", user_stack_kva);
+        }
+
+        if (off + 1024 >= PROC_LOG_BUF_SIZE) { serial_write_string(buf); off = 0; }
+
+        tn = tn->next;
+    }
+
+    n = sprintf_(buf + off,
+        "  total_threads=%d\n"
+        "=================================================================================================\n\n",
+        tcount);
+    if (n > 0) off += (size_t)n;
+
+    serial_write_string(buf);
+
+    release_lock(&scheduler_lock, SCHED_LOCK_BIT);
+    sti();
 }

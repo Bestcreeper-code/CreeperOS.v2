@@ -167,7 +167,7 @@ ssize_t syscall_handler(
             return sys_access((const __user char*)rdi, rsi);
 
         case SYS_SCHED_YIELD: // sys_sched_yield
-            // yield_core(rsp);
+            yield_core(rsp);
             return 0;
 
         case SYS_DUP: // sys_dup
@@ -269,7 +269,7 @@ int sys_open(
     char kpath[PATH_MAX];
     copy_from_user(kpath, (const __user void*)filename, sizeof(kpath));
 
-    struct inode *start = path_resolve_start(kpath);
+    struct inode* start = path_resolve_start(kpath);
     if (!start)
         return -E_INVAL;
 
@@ -339,12 +339,12 @@ ssize_t sys_read(
     if (fd >= DEFAULT_FILE_TABLE_ENTRIES)
         return -E_INVAL;
 
-    file *fil = &((file*)current_process->opened_file_table)[fd];
+    file* fil = &((file*)current_process->opened_file_table)[fd];
 
     if (!fil->f_inode || !fil->f_ops || !fil->f_ops->read)
         return -E_INVAL;
 
-    char *kbuf = kmalloc(count);
+    char* kbuf = kmalloc(count);
     if (!kbuf)
         return -E_NOMEM;
 
@@ -376,7 +376,7 @@ ssize_t sys_write(
         (int)fd, (void*)buf, count);
 #endif
     if(fd==1) {
-        Sys_log_NoPos("%.*s\n",(int)count, (char*)buf);
+        Sys_log_NoPos("%.*s",(int)count, (char*)buf);
         return count;
     } else if(fd==2) {
         Sys_log_NoPos(ESC_RED"%.*s\n"ESC_RESET,(int)count, (char*)buf);
@@ -392,12 +392,12 @@ ssize_t sys_write(
     if (fd >= DEFAULT_FILE_TABLE_ENTRIES)
         return -E_INVAL;
     
-    file *fil = &((file*)current_process->opened_file_table)[fd];
+    file* fil = &((file*)current_process->opened_file_table)[fd];
 
     if (!fil->f_inode || !fil->f_ops || !fil->f_ops->write)
         return -E_INVAL;
 
-    char *kbuf = kmalloc(count);
+    char* kbuf = kmalloc(count);
     if (!kbuf)
         return -E_NOMEM;
 
@@ -431,7 +431,7 @@ int sys_close(
     if (fd >= DEFAULT_FILE_TABLE_ENTRIES)
         return -E_INVAL;
 
-    file *fil = &((file*)current_process->opened_file_table)[fd];
+    file* fil = &((file*)current_process->opened_file_table)[fd];
 
     if (!fil->f_inode)
         return -E_INVAL;
@@ -541,7 +541,7 @@ int sys_munmap(
     uintptr_t addr,
     size_t len
 ) {
-    uint64_t *pml4 = PHYS_2_HHDM(current_process->cr3);
+    uint64_t* pml4 = PHYS_2_HHDM(current_process->cr3);
 
     uintptr_t start = addr & ~(PAGE_SIZE_4K - 1);
     uintptr_t end = (addr + len + PAGE_SIZE_4K - 1) & ~(PAGE_SIZE_4K - 1);
@@ -555,7 +555,7 @@ int sys_munmap(
 
 
 uintptr_t sys_brk(size_t brk) {
-    heap_t *heap = &current_process->heap;
+    heap_t* heap = &current_process->heap;
 
     if (brk == 0)
         return heap->higher;
@@ -609,13 +609,13 @@ pid_t sys_getpid() {
 pid_t sys_fork(register_t rsp) {
     
     pid_t pid = fork_process(current_thread, rsp);
-    id_kind_t e;
-    sleep_ms(1000);
-    sleep_ms(1000);
-    ((tcb_t*)id_lookup(6,&e))->state=TCB_STATE_RUNNABLE;
+    // id_kind_t e;
+    // sleep_ms(1000);
+    // sleep_ms(1000);
+    // ((tcb_t*)id_lookup(6,&e))->state=TCB_STATE_RUNNABLE;
     if(pid < 1) return -E_NOMEM;
-    id_kind_t kind_out;
-    Sys_Warning("fork %d     %d\n",(int)pid, ((pcb_t*)id_lookup(pid+1, &kind_out))->state);
+    // id_kind_t kind_out;
+    // Sys_Warning("fork %d     %d\n",(int)pid, ((pcb_t*)id_lookup(pid+1, &kind_out))->state);
     return pid;
 }
 
@@ -695,10 +695,10 @@ pid_t sys_wait4(
         if (zombie) {
             pid_t ret_pid   = zombie->pid;
             int exit_code = zombie->exit_code;
-            reap_us_proc_threads(zombie);
-
             if (wstatus)
                 copy_to_user(wstatus, &exit_code, sizeof(exit_code));
+            reap_us_proc_threads(zombie);
+
 
             return ret_pid;
         }
@@ -742,7 +742,7 @@ char* sys_getcwd(
     if (!current_process->cwd_i)
         return (char*)-E_INVAL;
 
-    char *path = kpath_reverse(current_process->cwd_i->i_dentry);
+    char* path = kpath_reverse(current_process->cwd_i->i_dentry);
     if (!path)
         return (char*)-E_NOMEM;
 
@@ -778,7 +778,7 @@ int sys_mkdir(
     copy_from_user(kpath, (const __user void*)path, sizeof(kpath));
     
 
-    struct inode *start = path_resolve_start(kpath);
+    struct inode* start = path_resolve_start(kpath);
     if (!start)
         return -E_INVAL;
 
@@ -842,7 +842,7 @@ int sys_unlink(
     const __user char* path
 ) {
 #if (SYSCALL_DEBUG ==2)
-    Sys_Debug("unlink called: path=%p\n", (void *)path);
+    Sys_Debug("unlink called: path=%p\n", (void*)path);
 #endif
 
     if (!path)
@@ -852,11 +852,12 @@ int sys_unlink(
     copy_from_user(kpath, (const __user void*)path, sizeof(kpath));
     
 
-    struct inode *start = path_resolve_start(kpath);
+    struct inode* start = path_resolve_start(kpath);
     if (!start)
         return -E_INVAL;
 
-    char *parent_path, *name;
+    char* parent_path;
+    char* name;
     int err = split_path(kpath, &parent_path, &name);
     if (err)
         return err;
@@ -1145,7 +1146,7 @@ int sys_openat(
     char kpath[PATH_MAX];
     copy_from_user(kpath, (const __user void*)filename, sizeof(kpath));
 
-    struct inode *start = resolve_at(dfd, kpath);
+    struct inode* start = resolve_at(dfd, kpath);
     if (!start)
         return -E_INVAL;
 
@@ -1214,7 +1215,7 @@ int sys_mkdirat(
     char kpath[PATH_MAX];
     copy_from_user(kpath, (const __user void*)path, sizeof(kpath));
 
-    struct inode *start = resolve_at(dfd, kpath);
+    struct inode* start = resolve_at(dfd, kpath);
     if (!start)
         return -E_INVAL;
 
@@ -1236,11 +1237,12 @@ int sys_unlinkat(
     char kpath[PATH_MAX];
     copy_from_user(kpath, (const __user void*)pathname, sizeof(kpath));
 
-    struct inode *start = resolve_at(dfd, kpath);
+    struct inode* start = resolve_at(dfd, kpath);
     if (!start)
         return -E_INVAL;
 
-    char *parent_path, *name;
+    char* parent_path;
+    char* name;
     int err = split_path(kpath, &parent_path, &name);
     if (err) return err;
 

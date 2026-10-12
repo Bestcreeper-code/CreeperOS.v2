@@ -47,7 +47,7 @@
 /* ------------------------------------------------------------------ */
 
 /* Binary used to exercise fork() + execve() + wait4() */
-#define EXEC_TEST_BIN "/initrd/testportmalloc/nalloc/build/tests/rbtree_test"
+#define EXEC_TEST_BIN "/initrd/rbtree_test"
 
 #define TEST_DIR      "/tmp/syscall_test_dir"
 #define TEST_SUBDIR   "/tmp/syscall_test_dir/sub"
@@ -312,7 +312,8 @@ static void test_fork_execve_wait4(void)
         /* execve only returns on failure */
         fprintf(stderr, ANSI_RED "  [FAIL] execve(\"%s\") failed: %s\n"
                 ANSI_RESET, EXEC_TEST_BIN, strerror(errno));
-        _exit(127);
+        exit(127);
+        for(;;);
     }
 
     /* parent */

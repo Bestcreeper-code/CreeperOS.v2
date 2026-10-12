@@ -1,4 +1,6 @@
 #include "elf.h"
+#include "arch/vmm.h"
+#include "asm/asm.h"
 #include "config.h"
 #include "debug/Logger.h"
 #include "defines/container_of.h"
@@ -10,6 +12,7 @@
 #include "mm/vmm_arch.h"
 #include "memops.h"
 
+#include <stddef.h>
 #include <stdint.h>
 
 
@@ -171,7 +174,7 @@ pid_t load_elf_from_vfs(const char* vfs_path, char** argv, char** envp)
 #endif
 
     pmm_free_pages(raw_image, raw_pages);
-
+cli();
     pcb_t* proc = new_usproc(
         current_process,
         (void*)ehdr->e_entry,
@@ -183,6 +186,39 @@ pid_t load_elf_from_vfs(const char* vfs_path, char** argv, char** envp)
     RET_IF(!proc, -E_NOMEM);
 
     proc->cwd_i = dent->parent->inode;
+
+    //fill fd table with stdin
+    dentry* stdin_dentry = kpath_lookup(root_dentry->inode, "/dev/input/input0");
+    if (!stdin_dentry)
+        return -E_NOENT;
+
+    if (!stdin_dentry->inode) {
+        return -E_NODEV;
+    }
+
+    if (!stdin_dentry->inode->i_fop ||
+        !stdin_dentry->inode->i_fop->open) {
+        return -E_NOSYS;
+    }
+
+    if (!proc || !proc->opened_file_table) {
+        return -E_INVAL;
+    }
+
+    
+    file* stdin_fd = (file*)PHYS_2_HHDM(proc->opened_file_table_phys);
+    Sys_log("%p",stdin_fd);
+
+    ret = stdin_dentry->inode->i_fop->open(
+        stdin_dentry->inode,
+        stdin_fd
+    );
+
+    if (ret < 0) {
+        return ret;
+    }
+
+sti();
 
     
     tcb_t* main_thread = container_of(proc->threads.first, tcb_t, proc_list_node);

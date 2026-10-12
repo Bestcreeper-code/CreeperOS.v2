@@ -25,3 +25,4 @@ limine-binary
 *.log
 _initrd/usr/include
 _initrd/usr/lib
+*/build/

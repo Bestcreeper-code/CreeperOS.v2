@@ -222,11 +222,11 @@ void ps2_keyboard_handler(void* frame) {
         // Sys_log_NoPos("%c",ch);
     }
 
-    if(ch=='l') _log_process_tree();
+    // if(ch=='P') _log_process_tree();
     if(ch=='L') _log_all_processes();
-    if(ch=='t') fs_tree(root_dentry, 0);
-    if(ch=='c') cpu_log_specs();
-    if(ch=='m') {
+    if(ch=='T') fs_tree(root_dentry, 0);
+    if(ch=='C') cpu_log_specs();
+    if(ch=='M') {
         char buff[100];
         byte_nb_simplify(pmm_get_total_pages() - pmm_get_free_pages(), buff, 4);
         Sys_log_NoPos(ESC_BG_YELLOW"Ram: %s", buff);

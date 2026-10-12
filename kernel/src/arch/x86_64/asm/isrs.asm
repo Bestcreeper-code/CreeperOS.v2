@@ -104,7 +104,8 @@ isr_common_handler:
     mov  rax, [rsp + 128]
     mov  [isr_call_stack], rax
 
-    cmp  byte [rel panic_count], 0
+    cmp  byte [panic_count], 0
+    jmp  .zero_trace  ; todo rem line to bt
     jne  .zero_trace
 
     mov  byte [rel panic_count], 1

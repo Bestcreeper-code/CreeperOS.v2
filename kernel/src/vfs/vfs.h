@@ -78,10 +78,13 @@
 #define AT_SYMLINK_FOLLOW 0x400
 #define AT_EACCESS 0x200
 
+#define FD_CLOEXEC 1
+
 typedef struct file {
     struct inode* f_inode;          // points to the file/directory inode
     loff_t f_pos;                   // current file position (for read/write)
-    uint32_t f_flags;           // O_RDONLY, O_WRONLY, etc.
+    uint32_t f_flags;               // O_RDONLY, O_WRONLY, etc.
+    uint32_t fd_flags;           
     void* private_data;             // filesystem-specific data
     const struct file_operations* f_ops; // pointer to file operations
     
