@@ -24,7 +24,7 @@ struct block_device* register_block_device(const char *name, lsize_t size,
         
     
 #if BLKDEV_DEBUG
-    Sys_log("Registered blkdev [%s] with 0x%llx bytes\n",
+    Sys_log("Registered blkdev [%s] with 0x%lx bytes\n",
         name,
         size);
 #endif

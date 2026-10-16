@@ -8,6 +8,7 @@
 #define USER_DATA_SEGMENT   0x1B
 #define TSS_GDT_INDEX       5
 
+#define RING_TO_STR(cs) (cs & 0x3 ? "user" : "kernel")
 
 struct gdt_entry64 {
     uint16_t limit_low;

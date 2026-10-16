@@ -333,7 +333,7 @@ pid_t fork_process(tcb_t* parent_thread, uint64_t rsp)
 
     // ---- link in ----
 
-    acquire_lock(&scheduler_lock, SCHED_LOCK_BIT);
+    unsigned long irq_flags = spin_lock_irqsave(&scheduler_lock);
 
     hlist_add_head(&child_thread->proc_list_node, &child->threads);
     hlist_add_head(&child_thread->shed_list_node, &scheduler_threads);
@@ -344,7 +344,7 @@ pid_t fork_process(tcb_t* parent_thread, uint64_t rsp)
     id_table_set_thread(child_thread->tid, child_thread);
 
     process_list_depth++;
-    release_lock(&scheduler_lock, SCHED_LOCK_BIT);
+    spin_unlock_irqrestore(&scheduler_lock, irq_flags);
 
     Sys_Success("fork: pid %u -> child pid %u (tid %u)\n",
                 (unsigned)parent->pid, (unsigned)child->pid, (unsigned)child_thread->tid);

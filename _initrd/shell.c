@@ -130,6 +130,18 @@ int main(int argc, char* argv[], char* envp[])
             cat_file(new_argc, new_argv);
             continue;
         }
+        else if (strcmp(new_argv[0], "clear") == 0) {
+            write(STDOUT_FILENO, "\033[H\033[J", 6);
+            continue;
+        }
+        else if (strcmp(new_argv[0], "exit") == 0) {
+            if(new_argc > 1) {
+                int exit_code = atoi(new_argv[1]);
+                exit(exit_code);
+            }
+            exit(0);
+            continue;
+        }
 
 
 

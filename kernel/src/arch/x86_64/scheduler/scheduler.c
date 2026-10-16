@@ -43,13 +43,13 @@ uint8_t task_switching_flag = 0;
 uint64_t tid_bitmap[_TID_BITMAP_SIZE] = {[0 ... _TID_BITMAP_SIZE-1] = 0xFFFFFFFFULL};
 int tid_bitmap_curr = 0;
 
-size_t scheduler_lock = 0;
+volatile uint32_t scheduler_lock = 0;
 
 
 bool tid0_used = false;
 
 tid_t _get_unused_tid() {
-    acquire_lock(&scheduler_lock, SCHED_LOCK_BIT);
+    unsigned long irq_flags = spin_lock_irqsave(&scheduler_lock);
 
     tid_t result = (tid_t)-1;
 
@@ -72,7 +72,7 @@ tid_t _get_unused_tid() {
     }
 
 done:
-    release_lock(&scheduler_lock, SCHED_LOCK_BIT);
+    spin_unlock_irqrestore(&scheduler_lock, irq_flags);
     return result;
 }
 
@@ -82,9 +82,9 @@ void _free_tid(tid_t tid) {
 
     if (index >= _TID_BITMAP_SIZE) return;
 
-    acquire_lock(&scheduler_lock, SCHED_LOCK_BIT);
+    unsigned long irq_flags = spin_lock_irqsave(&scheduler_lock);
     tid_bitmap[index] |= (1ULL << bit);
-    release_lock(&scheduler_lock, SCHED_LOCK_BIT);
+    spin_unlock_irqrestore(&scheduler_lock, irq_flags);
 }
 
 void* id_table[MAX_TID]; //NULL = unused
@@ -217,10 +217,10 @@ int kill_ktask(tcb_t* t) {
 
     Sys_log("ktask %u exited with code:%d\n", t->tid, t->exit_code);
 
-    acquire_lock(&scheduler_lock, SCHED_LOCK_BIT);
+    unsigned long irq_flags = spin_lock_irqsave(&scheduler_lock);
     _unlink_thread(t);
     id_table_clear(t->tid);
-    release_lock(&scheduler_lock, SCHED_LOCK_BIT);
+    spin_unlock_irqrestore(&scheduler_lock, irq_flags);
 
     _free_tid(t->tid);
 
@@ -235,26 +235,28 @@ static void reaper_ktask() {
     while (true) {
         tcb_t* victim = NULL;
 
-        acquire_lock(&scheduler_lock, SCHED_LOCK_BIT);
+        unsigned long irq_flags = spin_lock_irqsave(&scheduler_lock);
         struct hlist_node* n = scheduler_threads.first;
         while (n) {
             tcb_t* t = container_of(n, tcb_t, shed_list_node);
             if (t->state & TCB_STATE_DEAD) { victim = t; break; }
             n = n->next;
         }
-        release_lock(&scheduler_lock, SCHED_LOCK_BIT);
+        spin_unlock_irqrestore(&scheduler_lock, irq_flags);
 
         if (victim) { kill_ktask(victim); continue; }
 
         pcb_t* orphan = NULL;
-        acquire_lock(&scheduler_lock, SCHED_LOCK_BIT);
+        
+        irq_flags = spin_lock_irqsave(&scheduler_lock);
+        
         struct hlist_node* pn = _scheduler_processes_list_head.first;
         while (pn) {
             pcb_t* p = container_of(pn, pcb_t, proclist_node);
             if ((p->state & PCB_STATE_ZOMBIE) && !p->parent) { orphan = p; break; }
             pn = pn->next;
         }
-        release_lock(&scheduler_lock, SCHED_LOCK_BIT);
+        spin_unlock_irqrestore(&scheduler_lock, irq_flags);
 
         if (orphan) { reap_us_proc_threads(orphan); continue; }
 
@@ -637,7 +639,7 @@ pcb_t* new_usproc(pcb_t* parent, void* entry, char* name, physptr_t page_dir,
     main_thread->fs_base = 0;
     main_thread->gs_base = 0;
 
-    acquire_lock(&scheduler_lock, SCHED_LOCK_BIT);
+    unsigned long irq_flags = spin_lock_irqsave(&scheduler_lock);
 
     hlist_add_head(&main_thread->proc_list_node, &proc->threads);
     hlist_add_head(&main_thread->shed_list_node, &scheduler_threads);
@@ -649,7 +651,7 @@ pcb_t* new_usproc(pcb_t* parent, void* entry, char* name, physptr_t page_dir,
     id_table_set_thread(main_thread->tid, main_thread);
 
     process_list_depth++;
-    release_lock(&scheduler_lock, SCHED_LOCK_BIT);
+    spin_unlock_irqrestore(&scheduler_lock, irq_flags);
 
     Sys_Success("task '%s': created sucesssfully\n", name);
     return proc;
@@ -666,10 +668,10 @@ static void _usthread_exit_locked(tcb_t* t, int exit_code) {
 void usthread_exit(tcb_t* t, int exit_code) {
     if (!t || t->process == kernel_proc) return;
 
-    acquire_lock(&scheduler_lock, SCHED_LOCK_BIT);
-    if (t->state & TCB_STATE_ZOMBIE) { release_lock(&scheduler_lock, SCHED_LOCK_BIT); return; }
+    unsigned long irq_flags = spin_lock_irqsave(&scheduler_lock);
+    if (t->state & TCB_STATE_ZOMBIE) { spin_unlock_irqrestore(&scheduler_lock, irq_flags); return; }
     _usthread_exit_locked(t, exit_code);
-    release_lock(&scheduler_lock, SCHED_LOCK_BIT);
+    spin_unlock_irqrestore(&scheduler_lock, irq_flags);
 
     if (t->user_stack.top) {
         pmm_free_pages(ADDR_TO_PAGE(t->user_stack.top), ADDR_TO_PAGE(t->user_stack.size));
@@ -681,8 +683,8 @@ void usthread_exit(tcb_t* t, int exit_code) {
 void usproc_exit(pcb_t* proc, int exit_code) {
     if (!proc || proc == kernel_proc) return;
 
-    acquire_lock(&scheduler_lock, SCHED_LOCK_BIT);
-    if (proc->state & PCB_STATE_ZOMBIE) { release_lock(&scheduler_lock, SCHED_LOCK_BIT); return; }
+    unsigned long irq_flags = spin_lock_irqsave(&scheduler_lock);
+    if (proc->state & PCB_STATE_ZOMBIE) { spin_unlock_irqrestore(&scheduler_lock, irq_flags); return; }
 
     struct hlist_node* tn = proc->threads.first;
     while (tn) {
@@ -693,7 +695,7 @@ void usproc_exit(pcb_t* proc, int exit_code) {
     }
     proc->exit_code = exit_code;
     proc->state      = PCB_STATE_ZOMBIE;
-    release_lock(&scheduler_lock, SCHED_LOCK_BIT);
+    spin_unlock_irqrestore(&scheduler_lock, irq_flags);
 
     
     tn = proc->threads.first;
@@ -731,15 +733,15 @@ int reap_us_thread(tcb_t* t) {
 
     Sys_log("reaped thread %u (proc '%s') exit=%d\n", t->tid, proc->name, t->exit_code);
 
-    acquire_lock(&scheduler_lock, SCHED_LOCK_BIT);
+    unsigned long irq_flags = spin_lock_irqsave(&scheduler_lock);
     hlist_del(&t->proc_list_node);
     id_table_clear(t->tid);
     bool proc_empty = (proc->threads.first == NULL);
-    release_lock(&scheduler_lock, SCHED_LOCK_BIT);
+    spin_unlock_irqrestore(&scheduler_lock, irq_flags);
 
     _free_tid(t->tid);
     page_kfree(t->kernel_stack.top, ADDR_TO_PAGE(t->kernel_stack.size));
-    kfree(t);
+    aligned_free(t);// TOFIX
 
     if (proc_empty && (proc->state & PCB_STATE_ZOMBIE))
         reap_us_proc(proc);
@@ -758,17 +760,17 @@ int reap_us_proc(pcb_t* proc) {
         return -1;
     }
 
-    acquire_lock(&scheduler_lock, SCHED_LOCK_BIT);
+    unsigned long irq_flags = spin_lock_irqsave(&scheduler_lock);
     hlist_del(&proc->proclist_node);
     if (proc->parent) hlist_del(&proc->siblings_list_node);
     process_list_depth--;
     id_table_clear(proc->pid);
-    release_lock(&scheduler_lock, SCHED_LOCK_BIT);
+    spin_unlock_irqrestore(&scheduler_lock, irq_flags);
 
     vmm_pagetable_free_owned(proc->cr3);  // safe now: nothing of this proc runs anymore
     _free_tid(proc->pid);
     kfree(proc->name);
-    kfree(proc);
+    aligned_free(proc);// TOFIX
     return 0;
 }
 
@@ -872,11 +874,11 @@ tcb_t* new_thread(pcb_t* proc, void* entry, uint16_t starting_state) {
         );
     }
 
-    acquire_lock(&scheduler_lock, SCHED_LOCK_BIT);
+    unsigned long irq_flags = spin_lock_irqsave(&scheduler_lock);
     hlist_add_head(&new_thread->proc_list_node, &proc->threads);
     hlist_add_head(&new_thread->shed_list_node, &scheduler_threads);
     id_table_set_thread(new_thread->tid, new_thread);
-    release_lock(&scheduler_lock, SCHED_LOCK_BIT);
+    spin_unlock_irqrestore(&scheduler_lock, irq_flags);
 
     return new_thread;
 }
@@ -901,7 +903,8 @@ tcb_t* new_thread(pcb_t* proc, void* entry, uint16_t starting_state) {
 
 extern uint8_t fpu_enabled;
 void* sched_next_process_core(uint64_t saved_rsp) {
-    if(!try_acquire_lock(&scheduler_lock, SCHED_LOCK_BIT)) {
+    unsigned long irq_flags = try_lock_irqsave(&scheduler_lock);
+    if(!irq_flags) {
         return (void*)saved_rsp;//later would be other probably 
     }
     tcb_t* current = current_thread;
@@ -921,9 +924,6 @@ void* sched_next_process_core(uint64_t saved_rsp) {
     }
 #endif
     
-    // static char buffer[256];
-    // sprintf_(buffer,"%d\n",current->tid);
-    // serial_write_string(buffer);
     struct hlist_node* next_node = current->shed_list_node.next;
     tcb_t* next = NULL;
 
@@ -954,7 +954,7 @@ void* sched_next_process_core(uint64_t saved_rsp) {
     current_thread  = next;
     current_process = next->process;
 
-    release_lock(&scheduler_lock, SCHED_LOCK_BIT);
+    spin_unlock_irqrestore(&scheduler_lock, irq_flags);
 
     __asm__ volatile ("mov %0, %%cr3" :: "r"(next->process->cr3) : "memory");
 
@@ -964,7 +964,7 @@ void* sched_next_process_core(uint64_t saved_rsp) {
         fxrstor_state(next->fp_state);
     }
 
-    set_tss_sp(next->k_rsp);
+    set_tss_sp(next->kernel_stack.bottom);
 
     return (void*)next->k_rsp;
 }
@@ -1055,7 +1055,7 @@ void log_process_full(pcb_t* proc) {
     int n;
 
     cli();
-    acquire_lock(&scheduler_lock, SCHED_LOCK_BIT);
+    unsigned long irq_flags = spin_lock_irqsave(&scheduler_lock);
 
     n = sprintf_(buf + off,
         "=================================================================================================\n"
@@ -1147,6 +1147,20 @@ void log_process_full(pcb_t* proc) {
 
     serial_write_string(buf);
 
-    release_lock(&scheduler_lock, SCHED_LOCK_BIT);
+    spin_unlock_irqrestore(&scheduler_lock, irq_flags);
     sti();
+}
+
+__attribute__((noreturn))
+void kill_current_process(cpu_registers_t* regs, int exit_code, const char* reason) {
+    if (!current_process || current_process == kernel_proc) {
+        Sys_Fatal("Kernel task fault: %s rip=%#lx\n", reason, regs->rip);
+        panic(reason);
+    }
+
+    Sys_Error("Process %d killed: %s (%s, rip=%#lx)\n",
+              current_process->pid, reason, RING_TO_STR(regs->cs), regs->rip);
+
+    usproc_exit(current_process, exit_code);
+    for (;;) yield_core(regs->rsp);
 }

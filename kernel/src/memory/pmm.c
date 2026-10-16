@@ -11,13 +11,13 @@
 extern struct limine_hhdm_request hhdm_request;
 extern struct limine_memmap_request memmap_request;
 
-uint64_t pmm_lock;
+uint32_t pmm_lock;
 
-static inline void pmm_lock_acquire(){
-    acquire_lock(&pmm_lock, 0);
+static inline unsigned long pmm_lock_acquire(){
+    return spin_lock_irqsave(&pmm_lock);
 }
-static inline void pmm_lock_release(){
-    release_lock(&pmm_lock, 0);
+static inline void pmm_lock_release(unsigned long flags){
+    spin_unlock_irqrestore(&pmm_lock, flags);
 }
 
 static inline void* phys_to_virt(uintptr_t phys) {
@@ -81,7 +81,7 @@ void pmm_init() {
     struct limine_memmap_response *mm = memmap_request.response;
     for (uint64_t i = 0; i < mm->entry_count; i++) {
         struct limine_memmap_entry *e = mm->entries[i];
-        if (e->type == LIMINE_MEMMAP_USABLE) total_pages+=e->length;
+        if (e->type == LIMINE_MEMMAP_USABLE) total_pages += ADDR_TO_PAGE(e->length);
     }
     bitmap_bits = total_pages;
     bitmap_next = 0;
@@ -130,7 +130,7 @@ void pmm_init() {
 }
 
 physptr_t pmm_alloc() {
-    pmm_lock_acquire();
+    unsigned long irq_flags = pmm_lock_acquire();
 
     size_t bit = bitmap_find_clear();
     if (bit == SIZE_MAX) panic("pmm: out of memory");
@@ -138,7 +138,7 @@ physptr_t pmm_alloc() {
     bitmap_set(bit);
     free_pages--;
 
-    pmm_lock_release();
+    pmm_lock_release(irq_flags);
     return (physptr_t)bit * PMM_PAGE_SIZE;
 }
 
@@ -151,7 +151,7 @@ physptr_t pmm_alloc_zeroed() {
 }
 
 void pmm_free(physptr_t phys) {
-    pmm_lock_acquire();
+    unsigned long irq_flags = pmm_lock_acquire();
 
     size_t bit = (size_t)(phys / PMM_PAGE_SIZE);
     if (bitmap_test(bit)) {
@@ -159,7 +159,7 @@ void pmm_free(physptr_t phys) {
         free_pages++;
     }
 
-    pmm_lock_release();
+    pmm_lock_release(irq_flags);
 }
 
 
@@ -167,7 +167,7 @@ physptr_t pmm_alloc_pages(size_t count) {
     if (count == 0) return 0;
     if (count == 1) return pmm_alloc();  // fast path
 
-    pmm_lock_acquire();
+    unsigned long irq_flags = pmm_lock_acquire();
 
     size_t bit = bitmap_find_clear_range(count);
     if (bit == SIZE_MAX) panic("pmm: out of memory");
@@ -176,7 +176,7 @@ physptr_t pmm_alloc_pages(size_t count) {
     bitmap_set(bit + i);
     free_pages -= count;
 
-    pmm_lock_release();
+    pmm_lock_release(irq_flags);
 
     return (uintptr_t)bit * PMM_PAGE_SIZE;
 }
@@ -189,14 +189,14 @@ physptr_t pmm_alloc_pages_zeroed(size_t count) {
 
 void pmm_free_pages(physptr_t phys, size_t count) {
 
-    pmm_lock_acquire();
+    unsigned long irq_flags = pmm_lock_acquire();
     
     size_t bit = phys / PMM_PAGE_SIZE;
     for (size_t i = 0; i < count; i++)
     bitmap_clear(bit + i);
     free_pages += count;
 
-    pmm_lock_release();
+    pmm_lock_release(irq_flags);
 }
 
 size_t pmm_get_total_pages() {

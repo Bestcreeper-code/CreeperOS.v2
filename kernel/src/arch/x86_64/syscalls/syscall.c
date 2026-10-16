@@ -525,8 +525,8 @@ int sys_mprotect(
 
         uint64_t* pte = (uint64_t*)phys;
 
-        Sys_log("%llx\n", current_process->cr3);
-        Sys_log("%llx\n", pte);
+        Sys_log("%lx\n", current_process->cr3);
+        Sys_log("%lx\n", pte);
         *pte &= ~(PTE_USER | PTE_WRITABLE | PTE_NX);
         *pte |= flags;
 
@@ -679,7 +679,7 @@ pid_t sys_wait4(
         pcb_t* zombie = NULL;
         bool has_matching_child = false;
 
-        acquire_lock(&scheduler_lock, SCHED_LOCK_BIT);
+        unsigned long irq_flags = spin_lock_irqsave(&scheduler_lock);
         struct hlist_node* cn = parent->childs.first;
         while (cn) {
             pcb_t* c = container_of(cn, pcb_t, siblings_list_node);
@@ -687,10 +687,10 @@ pid_t sys_wait4(
                 has_matching_child = true;
                 if (c->state & PCB_STATE_ZOMBIE) { zombie = c; break; }
             }
-            // Sys_Debug("searching : %d    lookup: %d(state: %s (%x) ; ret: %d)\n", pid, c->pid, _tcb_state_str(c->state),c->state,c->exit_code);
+            
             cn = cn->next;
         }
-        release_lock(&scheduler_lock, SCHED_LOCK_BIT);
+        spin_unlock_irqrestore(&scheduler_lock, irq_flags);
 
         if (zombie) {
             pid_t ret_pid   = zombie->pid;

@@ -3,21 +3,27 @@
 
 #include "arch/vmm.h"
 #include "debug/Logger.h"
+#include "defines/signals.h"
 #include "printf/printf.h"
 #include "scheduler/scheduler.h"
 #include "cpu/gdt.h"
 #include "timer/time.h"
 #include "asm/asm.h"
+#include "config.h"
+#include "defines/signals.h"
 #include <stddef.h>
 #include <stdint.h>
 
 
 
 
-#define MAX_KPANIK_COUNT 1
+static isr_handler isr_handlers[32] = {
+    [ISR_DOUBLE_FAULT] = handle_double_fault,
+    [ISR_PAGE_FAULT] = handle_page_fault
+};
 
 // CPU Exceptions
-static const char* crash_messages[] = {
+static const char* isr_messages[] = {
     "Divide by Zero",                    // 0
     "Debug Exception",                   // 1
     "NMI",                               // 2
@@ -61,56 +67,11 @@ static const char* crash_messages[] = {
 };
 
 
-enum crash_type {
 
-    CRASH_DIVIDE_BY_ZERO = 0,           // 0
-    CRASH_DEBUG_EXCEPTION,              // 1
-    CRASH_NMI,                          // 2 Non-Maskable Interrupt
-    CRASH_BREAKPOINT,                   // 3
-    CRASH_OVERFLOW,                     // 4
-    CRASH_BOUND_RANGE_EXCEEDED,         // 5
-    CRASH_INVALID_OPCODE,               // 6
-    CRASH_DEVICE_NOT_AVAILABLE,         // 7
-    CRASH_DOUBLE_FAULT,                 // 8
-    CRASH_COPROCESSOR_SEGMENT_OVERRUN, // 9 Obsolete
-    CRASH_INVALID_TSS,                  // 10
-    CRASH_SEGMENT_NOT_PRESENT,          // 11
-    CRASH_STACK_SEGMENT_FAULT,          // 12
-    CRASH_GENERAL_PROTECTION,           // 13
-    CRASH_PAGE_FAULT,                   // 14
-    CRASH_RESERVED_15,                  // 15
-
-
-    CRASH_X87_FPU_EXCEPTION,            // 16
-    CRASH_ALIGNMENT_CHECK,              // 17
-    CRASH_MACHINE_CHECK,                // 18
-    CRASH_SIMD_FP_EXCEPTION,            // 19
-    CRASH_VIRTUALIZATION_EXCEPTION,     // 20
-    CRASH_CONTROL_PROTECTION_EXCEPTION, // 21
-
-
-    CRASH_RESERVED_22,                  // 22
-    CRASH_RESERVED_23,                  // 23
-    CRASH_RESERVED_24,                  // 24
-    CRASH_RESERVED_25,                  // 25
-    CRASH_RESERVED_26,                  // 26
-    CRASH_RESERVED_27,                  // 27
-
-
-    CRASH_HYPERVISOR_INJECTION,         // 28
-    CRASH_VMM_COMMUNICATION,            // 29
-
-
-    CRASH_SECURITY_EXCEPTION,           // 30
-    CRASH_RESERVED_31,                  // 31
-
-    CRASH_CODES_AMOUNT                  // total count
-};
-
-char* isr_error_bits[CRASH_CODES_AMOUNT][32] = {
+static const char* isr_error_bits[ISR_CODES_AMOUNT][32] = {
 
     // 13 - General Protection Fault
-    [CRASH_GENERAL_PROTECTION] = {
+    [ISR_GENERAL_PROTECTION] = {
         "External event (EXT)",            // 0
         "Descriptor location (IDT=1)",     // 1
         "Table indicator (LDT=1)",         // 2
@@ -132,7 +93,7 @@ char* isr_error_bits[CRASH_CODES_AMOUNT][32] = {
     },
 
     // 14 - Page Fault
-    [CRASH_PAGE_FAULT] = {
+    [ISR_PAGE_FAULT] = {
         "Present",  // 0
         "Write access",                          // 1
         "User mode access",                      // 2
@@ -148,7 +109,7 @@ char* isr_error_bits[CRASH_CODES_AMOUNT][32] = {
 };
 
 void log_isr_error_code(unsigned char isr_idx, uint64_t code){
-    char** errcodes_array = isr_error_bits[isr_idx];
+    const char** errcodes_array = isr_error_bits[isr_idx];
 
     for(int i=0;i < 31;i++){
         if(errcodes_array[i] ){
@@ -162,153 +123,131 @@ void log_isr_error_code(unsigned char isr_idx, uint64_t code){
 
 
 
-volatile char panic_count = DISABLE_ISR_BACKTRACE;
-void _panic_handler(uint64_t isr_index, uint64_t err_code, cpu_registers_t* regs, uint64_t* call_stack) {
-cli();
-    usproc_exit(current_process, 139);//hardcoded segfault rn
-    // klogger_is_threaded=false;
-    if (panic_count >= MAX_KPANIK_COUNT) {
-        Sys_Fatal("Double Fault (%ld) %#lx\n", isr_index, regs->cr2);
-        Sys_Info("Fix your shit\n");
-        // for (;;);
-    }
-    
+volatile char panic_count = 0;
+
+void _isr_handler(uint64_t isr_index, uint64_t err_code, cpu_registers_t* regs, uint64_t* call_stack) {
+    cli();
+    klogger_is_threaded = false;
     panic_count++;
-    
-    // task_switching_flag = false;
-    if (isr_index == 14) {//page fault
-        handle_page_fault(regs, call_stack);
+
+    if (isr_index < 32 && isr_handlers[isr_index]) {
+        isr_ret ret = isr_handlers[isr_index](regs, call_stack);
+        if (ret == TRAP_HANDLED) return;
     }
-
-
-    Sys_log("Kernel panic (%lu | %#lx | CR2:%#lx)\n",
-        (uint64_t)isr_index,
-        (uint64_t)err_code,
-        (uint64_t)regs->cr2
-    );
-
     
-
-    
-
-
     const char* error_name =
-        (isr_index >= 0 &&
-         isr_index < (int)(sizeof(crash_messages) / sizeof(crash_messages[0])))
-            ? crash_messages[isr_index]
-            : "Unknown Crash";
-    Sys_log_NoPos(ESC_RED);
-    Sys_log_NoPos("=======================================================================\n");
-    Sys_log_NoPos("PANIK -> ISR Index: %lu (%s), Error Code: %#lx\n",
-        isr_index, error_name, err_code);
+        (isr_index < (sizeof(isr_messages) / sizeof(isr_messages[0])))
+        ? isr_messages[isr_index]
+        : "Unknown Crash";
 
-    Sys_log_NoPos(" A critical error has occurred");
-    if(current_process && current_process->name) 
-        Sys_log_NoPos(" in process %s (pid: %d)", current_process->name, current_process->pid);
-        Sys_log_NoPos(" in thread %d", current_thread->tid);
-    Sys_log_NoPos(":\n");
-
-    Sys_log_NoPos(" Error Code: %s (%03ld: %lx)\n",
-        error_name, isr_index, err_code);
-
-        
-    Sys_log_NoPos("Error Bits:\n");
-    
-    log_isr_error_code(isr_index, err_code);
-
-    Sys_log_NoPos(" Regs Dump:\n");
-
-
-    
-    Sys_log_NoPos(" rax: 0x%lx  rbx: 0x%lx  rcx: 0x%lx  rdx: 0x%lx\n",
-        regs->rax, regs->rbx,
-        regs->rcx, regs->rdx);
-
-    Sys_log_NoPos(" rsi: 0x%lx  rdi: 0x%lx  rbp: 0x%lx  rsp: 0x%lx\n",
-        regs->rsi, regs->rdi,
-        regs->rbp, regs->rsp);
-        
-        Sys_log_NoPos(" RIP: 0x%lx  RFLAGS: 0x%lx\n",
-            regs->rip, regs->rflags);
-            
-    Sys_log_NoPos(" r8: 0x%lx  r9: 0x%lx  r10: 0x%lx  r11: 0x%lx\n",
-        regs->r8, regs->r9,
-        regs->r10, regs->r11);
-
-    Sys_log_NoPos(" r12: 0x%lx  r13: 0x%lx  r14: 0x%lx  r15: 0x%lx\n",
-        regs->r12, regs->r13, regs->r14, regs->r15);
-
-
-
-
-    Sys_log_NoPos(" CS:  0x%04X  DS:  0x%04X  ES:  0x%04X\n",
-        regs->cs, regs->ds, regs->es);
-
-    Sys_log_NoPos(" FS:  0x%04X  GS:  0x%04X  SS:  0x%04X\n",
-        regs->fs, regs->gs, regs->ss);
-
-    Sys_log_NoPos(" CR0: 0x%016lx  \e[31mCR2: 0x%016lx\e[0m  CR3: 0x%016lx\n",
-        regs->cr0, regs->cr2, regs->cr3);
-    
-    Sys_log_NoPos(" CR4: 0x%016lx  CR8: 0x%016lx\n", 
-        regs->cr4, regs->cr8);
-
-    if (panic_count >= MAX_KPANIK_COUNT)for(;;);
-    sti();
-    void dump_userspace_mappings(uint64_t* pml4);
-    dump_userspace_mappings(PHYS_2_HHDM(regs->cr3));
-    
-    if (call_stack) {
-        Sys_log_NoPos(" Call Stack Trace:\n");
-        for (int i = 0; i < MAX_STACK_TRACE_SIZE; i++) {
-            uintptr_t addr = call_stack[i];
-            if (addr == 0) { 
-                
-                break;
-            }
-            // char tmp_buffer[64];
-            Sys_log_NoPos("    %s (%p)\n","???", (void*)addr);
-        }
-    }
-
-    for(;;);
-    
+    _panic_dump(error_name, NULL, isr_index, err_code, regs, call_stack);
 }
+
 
 void panic(const char* msg) {
-    _manual_panic(msg,NULL);
+    _panic_dump(msg, NULL, 0, 0, NULL, NULL);
 }
 
-void _manual_panic(const char* error, const char* info) {
-    Sys_Fatal("kernel panic triggered!\n");
-    Sys_Fatal("  Error: %s\n", error ? error : "(null)");
-    Sys_Fatal("  Info : %s\n", info ? info : "(null)");
+void _panic_dump(const char* error, const char* info,
+                uint64_t isr_index, uint64_t err_code,
+                cpu_registers_t* regs, uint64_t* call_stack) {
+    klogger_is_threaded = false;
 
-    if (error) {
-        Sys_Error("%s",error);
-    }
+    if (regs) {
+        Sys_log("Kernel panic (%lu | %#lx | CR2:%#lx)\n",
+                (uint64_t)isr_index,
+                (uint64_t)err_code,
+                (uint64_t)regs->cr2
+        );
 
-    if (info) {
-        Sys_Info("%s",info);
-    }
-
-    // pc_reboot();
-}
-
-
-
-void handle_page_fault(cpu_registers_t* regs, size_t* call_stack) {
-    uint64_t fault_addr = regs->cr2;
-    
-    if(fault_addr >= PAGE_SIZE_4K) {
-        Sys_Error("Page fault from process %d at address 0x%lx", 
-            current_process->pid, fault_addr);
-    } else {
-        Sys_Error("Null pointer dereference from process %d");
-    }
-    usproc_exit(current_process, 139);//hardcoded segfault rn
-    sti();
-    yield_core(regs->rsp);
-    for(;;) {}
+        Sys_log_NoPos(ESC_RED);
         
+        if (error) {
+            Sys_Fatal("Error: %s\n", error);
+        }
+        if (info) {
+            Sys_log("Info : %s\n", info);
+        }
+
+        Sys_log_NoPos("=======================================================================\n");
+        Sys_log_NoPos("PANIK -> ISR Index: %lu (%s), Error Code: %#lx\n",
+                      isr_index, error, err_code);
+
+        Sys_log_NoPos(" A critical error has occurred");
+        if (current_process && current_process->name)
+            Sys_log_NoPos(" in process %s (pid: %d)", current_process->name, current_process->pid);
+        Sys_log_NoPos(" in thread %d:\n", current_thread->tid);
+
+        Sys_log_NoPos(" Error Code: %s (%03ld: %lx)\n",
+                      error, isr_index, err_code);
+
+        Sys_log_NoPos("Error Bits:\n");
+        log_isr_error_code(isr_index, err_code);
+
+        Sys_log_NoPos(" Regs Dump:\n");
+
+        Sys_log_NoPos(" rax: 0x%lx  rbx: 0x%lx  rcx: 0x%lx  rdx: 0x%lx\n",
+                      regs->rax, regs->rbx, regs->rcx, regs->rdx);
+
+        Sys_log_NoPos(" rsi: 0x%lx  rdi: 0x%lx  rbp: 0x%lx  rsp: 0x%lx\n",
+                      regs->rsi, regs->rdi, regs->rbp, regs->rsp);
+        Sys_log_NoPos(" RIP: 0x%lx  RFLAGS: 0x%lx\n",
+                      regs->rip, regs->rflags);
+        Sys_log_NoPos(" r8: 0x%lx  r9: 0x%lx  r10: 0x%lx  r11: 0x%lx\n",
+                      regs->r8, regs->r9, regs->r10, regs->r11);
+
+        Sys_log_NoPos(" r12: 0x%lx  r13: 0x%lx  r14: 0x%lx  r15: 0x%lx\n",
+                      regs->r12, regs->r13, regs->r14, regs->r15);
+
+        Sys_log_NoPos(" CS:  0x%04X  DS:  0x%04X  ES:  0x%04X\n",
+                      regs->cs, regs->ds, regs->es);
+
+        Sys_log_NoPos(" FS:  0x%04X  GS:  0x%04X  SS:  0x%04X\n",
+                      regs->fs, regs->gs, regs->ss);
+
+        Sys_log_NoPos(" CR0: 0x%016lx  \e[31mCR2: 0x%016lx\e[0m  CR3: 0x%016lx\n",
+                      regs->cr0, regs->cr2, regs->cr3);
+        Sys_log_NoPos(" CR4: 0x%016lx  CR8: 0x%016lx\n",
+                      regs->cr4, regs->cr8);
+
+        sti();
+        void dump_userspace_mappings(uint64_t* pml4);
+        dump_userspace_mappings(PHYS_2_HHDM(regs->cr3));
+        if (call_stack) {
+            Sys_log_NoPos(" Call Stack Trace:\n");
+            for (int i = 0; i < MAX_STACK_TRACE_SIZE; i++) {
+                uintptr_t addr = call_stack[i];
+                if (addr == 0) {
+                    break;
+                }
+                Sys_log_NoPos("    %s (%p)\n", "???", (void*)addr);
+            }
+        }
+    } else {
+        Sys_Fatal("kernel panic triggered!\n");
+        Sys_Fatal("  Error: %s\n", error ? error : "(null)");
+        Sys_Fatal("  Info : %s\n", info ? info : "(null)");
+    }
+
+    Sys_log("Halting...");
+    hcf();
+}
+    
+
+
+isr_ret handle_double_fault(cpu_registers_t* regs, size_t* call_stack) {
+    Sys_Fatal("Double Fault (%#lx)\n", regs->cr2);
+    Sys_Info("Fix your shit\n");
+    hcf();
+}
+
+isr_ret handle_zero_div(cpu_registers_t* regs, size_t* call_stack) {
+    kill_current_process(regs, 128 + SIGFPE, "divide by zero");
+}
+
+
+isr_ret handle_page_fault(cpu_registers_t* regs, size_t* call_stack) {
+    bool null_deref = regs->cr2 < PAGE_SIZE_4K;
+    kill_current_process(regs, 128 + SIGSEGV,
+        null_deref ? "null pointer dereference" : "page fault");
 }

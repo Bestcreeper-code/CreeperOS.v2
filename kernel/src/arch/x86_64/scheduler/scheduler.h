@@ -129,7 +129,6 @@ typedef struct tcb {
 
 
     uint64_t signal_mask;
-    // #error add listeners/etc for waitpid
 
 }GCC_ATTR((aligned(16))) tcb_t;
 
@@ -143,8 +142,7 @@ extern struct hlist_head scheduler_threads;
 extern pcb_t* current_process;
 extern tcb_t* current_thread;
 
-#define SCHED_LOCK_BIT 0
-extern size_t scheduler_lock;
+extern volatile uint32_t scheduler_lock;
 
 extern uint16_t process_list_depth;
 
@@ -197,14 +195,14 @@ void _build_user_stack_frame(uint64_t** stack_top, uint64_t entry,
 // killing funcs
 int kill_ktask(tcb_t* t);
 
-    //userspace exits
-    void usthread_exit(tcb_t* t, int exit_code);
-    void usproc_exit(pcb_t* proc, int exit_code);
+//userspace exits
+void usthread_exit(tcb_t* t, int exit_code);
+void usproc_exit(pcb_t* proc, int exit_code);
 
-    //userspace reaps
-    int  reap_us_thread(tcb_t* t);
-    int  reap_us_proc(pcb_t* proc);
-    void reap_us_proc_threads(pcb_t* proc);
+//userspace reaps
+int  reap_us_thread(tcb_t* t);
+int  reap_us_proc(pcb_t* proc);
+void reap_us_proc_threads(pcb_t* proc);
 
 
 //misc/debug
@@ -219,3 +217,6 @@ void _log_all_processes();
 void _log_process_tree();
 
 const char* _tcb_state_str(uint16_t state);
+
+__attribute__((noreturn))
+void kill_current_process(cpu_registers_t* regs, int exit_code, const char* reason);

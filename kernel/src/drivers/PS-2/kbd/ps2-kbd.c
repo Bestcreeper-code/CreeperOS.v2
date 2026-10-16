@@ -188,28 +188,6 @@ unsigned char get_input_char_non_blocking(void) {
 }
 
 
-
-// unsigned char getc(){
-//     unsigned char chr = 0;
-//     while (chr == 0) {
-//         __asm__ __volatile__("sti; hlt");
-//         if (buf_head != buf_tail) {
-//             chr = input_char_buffer[buf_head];
-//             buf_head = (buf_head + 1) % INPUT_CHAR_BUFFER_SIZE;
-//         }
-//     }
-//     return chr;
-// }
-
-
-// unsigned char getc_nb(){
-//     if (buf_head == buf_tail)
-//         return 0;
-//     unsigned char chr = input_char_buffer[buf_head];
-//     buf_head = (buf_head + 1) % INPUT_CHAR_BUFFER_SIZE;
-//     return chr;
-// }
-
 GCC_ATTR((interrupt))
 void ps2_keyboard_handler(void* frame) {
     unsigned char ch = get_input_char_non_blocking();
@@ -219,10 +197,9 @@ void ps2_keyboard_handler(void* frame) {
             input_char_buffer[buf_tail] = ch;
             buf_tail = next_tail;
         }
-        // Sys_log_NoPos("%c",ch);
+        
     }
 
-    // if(ch=='P') _log_process_tree();
     if(ch=='L') _log_all_processes();
     if(ch=='T') fs_tree(root_dentry, 0);
     if(ch=='C') cpu_log_specs();

@@ -1,6 +1,6 @@
 [BITS 64]
 
-extern _panic_handler
+extern _isr_handler
 extern _current_eoi
 extern panic_count
 
@@ -160,7 +160,7 @@ isr_common_handler:
     lea  rdx, [rsp]
     lea  rcx, [isr_call_stack]
     sub  rsp, 8
-    call _panic_handler
+    call _isr_handler
     add  rsp, 8
 
     RESTORE_ALL
@@ -182,7 +182,7 @@ isr_common_handler:
     lea  rdx, [rsp]
     lea  rcx, [isr_call_stack]
     sub  rsp, 8
-    call _panic_handler
+    call _isr_handler
     add  rsp, 8
 
     RESTORE_ALL

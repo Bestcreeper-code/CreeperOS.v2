@@ -46,13 +46,13 @@ int tsc_clk_init() {
 
     
     if(!has_invariant_tsc()) {
-        Sys_Error("TSC is not invariant\n");
+        Sys_Warning("TSC is not invariant using PIT as fallback\n");
         return -1;
     }
     
     tsc_freq = get_tsc_freq();
     if(!tsc_freq){
-        Sys_Error("TSC freq not detected\n");
+        Sys_Warning("TSC freq not detected using PIT as fallback\n");
         return -1;
     }
     

@@ -26,3 +26,4 @@ limine-binary
 _initrd/usr/include
 _initrd/usr/lib
 */build/
+toolchain/cross/*

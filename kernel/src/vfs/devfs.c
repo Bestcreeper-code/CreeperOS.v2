@@ -1,9 +1,11 @@
 #include "devfs.h"
+#include "arch/vmm.h"
 #include "debug/Logger.h"
 #include "defines/helpers.h"
 #include "defines/types.h"
 #include "drivers/pit/pit.h"
 #include "memory/memory.h"
+#include "memory/pmm.h"
 #include "printf/printf.h"
 #include "vfs.h"
 #include "defines/err_codes.h"
@@ -165,7 +167,9 @@ struct file_operations devrandom_fops = {
 static ssize_t devmem_read(struct file* file, char* buf, size_t count, loff_t* offset) {
     RET_IF(!file || !buf || !offset, -E_INVAL);
  
-    memcpy(buf, (void*)(uintptr_t)*offset, count);
+    physptr_t phys_addr = (physptr_t)PHYS_2_HHDM(*offset);
+
+    memcpy(buf, (void*)(uintptr_t)phys_addr, count);
     *offset += count;
  
     return count;
@@ -174,7 +178,8 @@ static ssize_t devmem_read(struct file* file, char* buf, size_t count, loff_t* o
 static ssize_t devmem_write(struct file* file, const char* buf, size_t count, loff_t* offset) {
     RET_IF(!file || !buf || !offset, -E_INVAL);
  
-    memcpy((void*)(uintptr_t)*offset, buf, count);
+    physptr_t phys_addr = (physptr_t)PHYS_2_HHDM(*offset);
+    memcpy((void*)(uintptr_t)phys_addr, buf, count);
     *offset += count;
  
     return count;

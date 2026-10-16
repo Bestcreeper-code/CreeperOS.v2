@@ -91,6 +91,10 @@ static inline void sti(){
 static inline void hlt(){
     asm volatile("hlt");
 } 
+static inline void hcf(){
+    cli();
+    for(;;)hlt();
+} 
 
 static inline void brkpt(){
     asm volatile("int3");
