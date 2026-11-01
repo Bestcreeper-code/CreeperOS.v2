@@ -9,11 +9,13 @@
 
 #define DISABLE_LOGGER_KTHREAD 0
 #define DISABLE_REAPER_KTHREAD 0
+#define DISABLE_MAPPINGS_DUMP 1
 
 #define EXECUTABLE_DEBUG 0
 #define ELF_DEBUG 0
 #define FORK_DEBUG 1
 #define EXEC_DEBUG 1
+
 
 
 #define SYSCALL_DEBUG 0//1+ = raw args,2= specific syscall logs

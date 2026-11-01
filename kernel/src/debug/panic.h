@@ -68,6 +68,8 @@ void _panic_dump(const char* error, const char* info,
     cpu_registers_t* regs, uint64_t* call_stack);
 
 
+isr_ret handle_zero_div(cpu_registers_t* regs, size_t* call_stack);
 isr_ret handle_double_fault(cpu_registers_t* regs, size_t* call_stack);
+isr_ret handle_gpf(cpu_registers_t* regs, size_t* call_stack);
 isr_ret handle_page_fault(cpu_registers_t* regs, size_t* call_stack);
 #endif // CRASHHNDL_H

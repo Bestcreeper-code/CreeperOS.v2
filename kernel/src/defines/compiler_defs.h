@@ -48,3 +48,31 @@ static inline int copy_to_user(
     return 0;
 }
 
+
+static inline int strncpy_from_user(
+    char *dst,
+    const volatile char __user *src,
+    unsigned long n
+) {
+    unsigned long i;
+    for (i = 0; i < n; i++) {
+        char c = src[i];
+        dst[i] = c;
+        if (c == '\0') return i;
+    }
+    return -1;
+}
+
+static inline int strncpy_to_user(
+    volatile char __user *dst,
+    const char *src,
+    unsigned long n
+) {
+    unsigned long i;
+    for (i = 0; i < n; i++) {
+        char c = src[i];
+        dst[i] = c;
+        if (c == '\0') return i;
+    }
+    return -1;
+}

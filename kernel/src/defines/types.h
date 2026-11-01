@@ -9,8 +9,12 @@ typedef long long  loff_t;
 typedef int64_t    ssize_t;
 typedef long long  time64_t;
 typedef long long  blkcnt_t;
-typedef uint32_t   kuid_t;
-typedef uint32_t   kgid_t;
+
+typedef uint32_t   uid_t;
+typedef uint32_t   gid_t;
+typedef uid_t      kuid_t;
+typedef gid_t      kgid_t;
+
 typedef uint32_t   dev_t;
 
 typedef uint32_t lba32;

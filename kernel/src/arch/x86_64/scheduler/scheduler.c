@@ -192,19 +192,10 @@ static void _unlink_thread(tcb_t* t) {
 static void _teardown_process(pcb_t* proc) {
     hlist_del(&proc->proclist_node);
     process_list_depth--;
-
-    if (proc->heap.lower)
-        pmm_free_pages(ADDR_TO_PAGE(proc->heap.lower),
-                        ADDR_TO_PAGE(proc->heap.size));
-
-    if (proc->opened_file_table)
-        pmm_free_pages(ADDR_TO_PAGE(proc->opened_file_table),
-                        DEFAULT_FILE_TABLE_PAGES);
-
     vmm_pagetable_free_owned(proc->cr3);
     id_table_clear(proc->pid);
     kfree(proc->name);
-    kfree(proc);
+    aligned_free(proc);
 }
 
 
@@ -499,7 +490,7 @@ pcb_t* new_usproc(pcb_t* parent, void* entry, char* name, physptr_t page_dir,
     proc->childs.first = NULL;
     
 
-    physptr_t heap_pages = pmm_alloc_pages(DEFAULT_USER_HEAP_PAGES);
+    physptr_t heap_pages = pmm_alloc_pages_zeroed(DEFAULT_USER_HEAP_PAGES);
     if (!heap_pages) {
         Sys_Error("task '%s': unable to allocate user heap pages\n", name);
         _free_tid(proc->pid);
@@ -518,7 +509,7 @@ pcb_t* new_usproc(pcb_t* parent, void* entry, char* name, physptr_t page_dir,
     proc->heap.higher = DEFAULT_USER_HEAP_END;
     proc->heap.size   = DEFAULT_USER_HEAP_PAGES * PAGE_SIZE_4K;
 
-    physptr_t ft_pages = pmm_alloc_pages(256 / (PAGE_SIZE_4K / sizeof(file)));
+    physptr_t ft_pages = pmm_alloc_pages_zeroed(256 / (PAGE_SIZE_4K / sizeof(file)));
     if (!ft_pages) {
         Sys_Error("task '%s': unable to allocate user file table pages\n", name);
         pmm_free_pages(heap_pages, DEFAULT_USER_HEAP_PAGES);
@@ -684,7 +675,10 @@ void usproc_exit(pcb_t* proc, int exit_code) {
     if (!proc || proc == kernel_proc) return;
 
     unsigned long irq_flags = spin_lock_irqsave(&scheduler_lock);
-    if (proc->state & PCB_STATE_ZOMBIE) { spin_unlock_irqrestore(&scheduler_lock, irq_flags); return; }
+    if (proc->state & PCB_STATE_ZOMBIE) {
+        spin_unlock_irqrestore(&scheduler_lock, irq_flags);
+        return;
+    }
 
     struct hlist_node* tn = proc->threads.first;
     while (tn) {
@@ -694,28 +688,15 @@ void usproc_exit(pcb_t* proc, int exit_code) {
         tn = tn->next;
     }
     proc->exit_code = exit_code;
-    proc->state      = PCB_STATE_ZOMBIE;
+    proc->state     = PCB_STATE_ZOMBIE;
     spin_unlock_irqrestore(&scheduler_lock, irq_flags);
 
-    
-    tn = proc->threads.first;
-    while (tn) {
-        tcb_t* t = container_of(tn, tcb_t, proc_list_node);
-        if (t->user_stack.top) {
-            pmm_free_pages(ADDR_TO_PAGE(t->user_stack.top), ADDR_TO_PAGE(t->user_stack.size));
-            t->user_stack = (stack_t){0};
-        }
-        tn = tn->next;
-    }
+    for (tn = proc->threads.first; tn; tn = tn->next)
+        container_of(tn, tcb_t, proc_list_node)->user_stack = (stack_t){0};
 
-    if (proc->heap.lower) {
-        pmm_free_pages(ADDR_TO_PAGE(proc->heap.lower), ADDR_TO_PAGE(proc->heap.size));
-        proc->heap.lower = 0;
-    }
-    if (proc->opened_file_table) {
-        pmm_free_pages(ADDR_TO_PAGE(proc->opened_file_table), DEFAULT_FILE_TABLE_PAGES);
-        proc->opened_file_table = 0;
-    }
+    proc->heap.lower = 0;
+    proc->opened_file_table = 0;
+    proc->opened_file_table_phys = 0;
 }
 
 //reapers
@@ -954,7 +935,7 @@ void* sched_next_process_core(uint64_t saved_rsp) {
     current_thread  = next;
     current_process = next->process;
 
-    spin_unlock_irqrestore(&scheduler_lock, irq_flags);
+    
 
     __asm__ volatile ("mov %0, %%cr3" :: "r"(next->process->cr3) : "memory");
 
@@ -965,7 +946,9 @@ void* sched_next_process_core(uint64_t saved_rsp) {
     }
 
     set_tss_sp(next->kernel_stack.bottom);
-
+    
+    spin_unlock_irqrestore(&scheduler_lock, irq_flags);
+    
     return (void*)next->k_rsp;
 }
 
@@ -1153,7 +1136,7 @@ void log_process_full(pcb_t* proc) {
 
 __attribute__((noreturn))
 void kill_current_process(cpu_registers_t* regs, int exit_code, const char* reason) {
-    if (!current_process || current_process == kernel_proc) {
+    if (!current_process || IS_KTHREAD(current_thread)) {
         Sys_Fatal("Kernel task fault: %s rip=%#lx\n", reason, regs->rip);
         panic(reason);
     }
@@ -1164,3 +1147,76 @@ void kill_current_process(cpu_registers_t* regs, int exit_code, const char* reas
     usproc_exit(current_process, exit_code);
     for (;;) yield_core(regs->rsp);
 }
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+// int signal_enter(tcb_t* t, process_stack_frame* frame, int signo,
+//                  uint64_t handler, uint64_t restorer) {
+//     if (!t || !frame || IS_KTHREAD(t) || t->in_signal) return -1;
+//     if ((frame->cs & 3) != 3) return -1;                  // only from ring 3
+//     if (!handler  || handler  >= USER_VADDR_LIMIT) return -1;
+//     if (!restorer || restorer >= USER_VADDR_LIMIT) return -1;
+
+//     // skip the red zone, align, then "push" the return address (= restorer)
+//     // so the handler's `ret` lands in the sigreturn stub.
+//     // at handler entry rsp % 16 == 8, as if a `call` had just happened.
+//     uint64_t sp = (frame->rsp - SIG_REDZONE_BYTES) & ~0xFULL;
+//     sp -= 8;
+//     if (sp < STACK_LOWER_USPACE_ADDR) return -1;
+
+//     *(uint64_t*)sp = restorer;        // only user write; add stac()/clac() if SMAP
+
+//     t->sig_saved_frame = *frame;
+//     t->sig_saved_mask  = t->signal_mask;
+//     t->in_signal       = 1;
+//     t->signal_mask    |= (1ULL << signo);   // block same signal inside handler
+
+//     frame->rip    = handler;
+//     frame->rsp    = sp;
+//     frame->rdi    = (uint64_t)signo;
+//     frame->rsi    = 0;
+//     frame->rdx    = 0;
+//     frame->rax    = 0;
+//     frame->rflags &= ~(RFLAGS_TF | RFLAGS_DF);
+//     return 0;
+// }
+
+// /* sigreturn syscall body. Returns the restored rax so the syscall exit path's
+//  * "store rax into frame" step doesn't clobber it. */
+// uint64_t signal_return(tcb_t* t, process_stack_frame* frame) {
+//     if (!t->in_signal) return (uint64_t)-1;   // frame untouched
+
+//     *frame         = t->sig_saved_frame;
+//     t->signal_mask = t->sig_saved_mask;
+//     t->in_signal   = 0;
+//     return frame->rax;
+// }
+
+// void signal_deliver_pending(process_stack_frame* frame) {
+//     tcb_t* t = current_thread;
+//     if (IS_KTHREAD(t) || t->in_signal) return;
+
+//     uint64_t pending = (t->recieved_thread_signals | t->claimed_process_signals)
+//                        & ~t->signal_mask;
+//     if (!pending) return;
+
+//     int signo = __builtin_ctzll(pending);
+//     void* h = t->process->signal_handlers_array[signo];
+//     if (!h) return;   // SIG_DFL handling goes here (ignore/kill)
+
+//     if (signal_enter(t, frame, signo, (uint64_t)h, t->process->signal_restorer) == 0) {
+//         t->recieved_thread_signals &= ~(1ULL << signo);
+//         // clear the process-level bit here too, per your claiming design
+//     }
+// }

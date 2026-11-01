@@ -76,8 +76,8 @@ void unmap_4k_pages(uint64_t *pml4, uintptr_t va, size_t count);
 
 
 
-void vmm_map_page(uintptr_t vpage, uintptr_t ppage, uint64_t flags);
-void vmm_unmap_page(uintptr_t vpage);
+void vmm_map_page(uintptr_t va, uintptr_t pa, uint64_t flags);
+void vmm_unmap_page(uintptr_t va);
 
 void vmm_pagetable_free_owned(physptr_t pml4_phys);
 

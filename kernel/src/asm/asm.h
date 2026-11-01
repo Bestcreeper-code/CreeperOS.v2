@@ -31,6 +31,10 @@ typedef uint64_t register_t;
 
 #if defined(__x86_64__)
 
+
+#define RFLAGS_TF          (1ULL << 8)
+#define RFLAGS_DF          (1ULL << 10)
+
 static inline void outb(uint16_t port, uint8_t val) {
     __asm__ volatile ("outb %0, %1" : : "a"(val), "Nd"(port));
 }
@@ -87,6 +91,16 @@ static inline void cli(){
 static inline void sti(){
     asm volatile("sti");
 } 
+
+static inline uint64_t irqsave() {
+    uint64_t flags;
+    asm volatile("pushfq; popq %0" : "=r"(flags));
+    return flags;
+}
+
+static inline void irqrestore(uint64_t flags) {
+    asm volatile("pushq %0; popfq" : : "r"(flags));
+}
 
 static inline void hlt(){
     asm volatile("hlt");

@@ -8,7 +8,8 @@
 // void acquire_lock(size_t* addr, uint8_t bit);
 // int try_acquire_lock(size_t* addr, uint8_t bit);
 
-void release_lock(size_t* addr, uint8_t bit);
+// void release_lock(size_t* addr, uint8_t bit);
+#if defined(__x86_64__)
 
 static inline unsigned long try_lock_irqsave(volatile uint32_t *l) {
     unsigned long f;
@@ -32,3 +33,5 @@ static inline void spin_unlock_irqrestore(volatile uint32_t *l, unsigned long f)
     __atomic_store_n(l,0,__ATOMIC_RELEASE);
     if(f & (1<<9)) asm volatile("sti":::"memory");
 }
+
+#endif

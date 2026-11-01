@@ -17,12 +17,13 @@
 #define ID_TAG_BIT   63
 #define ID_TAG_MASK  (1ULL << ID_TAG_BIT)
 
+#define USER_VADDR_LIMIT   0x0000800000000000ULL
 
 #define DEFAULT_STACK_PAGE_AMOUNT   128
 #define DEFAULT_STACK_PAGE_BYTES    (DEFAULT_STACK_PAGE_AMOUNT << 12)
 
 #define STACK_LOWER_USPACE_ADDR     0x00007F0000000000ULL
-#define STACK_UPPER_USPACE_ADDR     0x0000800000000000ULL
+#define STACK_UPPER_USPACE_ADDR     USER_VADDR_LIMIT
 
 #define STACK_USPACE_SIZE           \
         (STACK_UPPER_USPACE_ADDR - STACK_LOWER_USPACE_ADDR)
@@ -48,7 +49,7 @@
 #define USER_ARGS_MAX_PAGES         16
 #define USER_ARGS_USPACE_ADDR       ((DEFAULT_USER_HEAP_START - PAGE_SIZE_4K*(USER_ARGS_MAX_PAGES+1)))
 
-
+#define SIG_REDZONE_BYTES  128
 
 typedef short pid_t;
 typedef short tid_t;
@@ -88,6 +89,9 @@ typedef struct pcb {
     
     kuid_t uid;
     kgid_t gid;
+
+    int ngroups;
+    kgid_t* groups;
     
     struct hlist_node proclist_node;
     
@@ -115,6 +119,7 @@ typedef struct tcb {
     pcb_t* process;
 
     uint64_t k_rsp;
+    uint64_t pre_signal_k_rsp; // 0 = not inside a sig handler
 
     stack_t kernel_stack;
     stack_t user_stack;
@@ -129,10 +134,19 @@ typedef struct tcb {
 
 
     uint64_t signal_mask;
+    uint64_t recieved_thread_signals;
+    uint64_t claimed_process_signals;
+
+    process_stack_frame sig_saved_frame;
+    bool in_signal;
 
 }GCC_ATTR((aligned(16))) tcb_t;
 
-
+typedef struct __attribute__((packed)) {
+    uint64_t ret;      // restorer address (handler returns here)
+    uint64_t signo;
+    process_stack_frame saved;    // interrupted context, restored on sigreturn
+} signal_uframe;
 
 extern struct hlist_head _scheduler_processes_list_head;
 extern uint8_t task_switching_flag;
@@ -148,11 +162,20 @@ extern uint16_t process_list_depth;
 
 extern pcb_t* kernel_proc;
 
+
 void _free_tid(tid_t tid);
 tid_t _get_unused_tid();
 
 
+#define IS_KTHREAD(t) ((t)->process == kernel_proc)
 
+static inline bool groups_list_has(kgid_t gid, pcb_t* proc) {
+    if (!proc || !proc->groups || proc->ngroups <= 0) return false;
+    for (int i = 0; i < proc->ngroups; i++) {
+        if (proc->groups[i] == gid) return true;
+    }
+    return false;
+}
 
 typedef enum { ID_NONE, ID_PROC, ID_THREAD } id_kind_t;
 extern void* id_table[];
@@ -178,8 +201,14 @@ void* sched_next_process_core(uint64_t saved_rsp);
 void _sched_next_process();
 
 
+//signals
 
+int signal_enter(tcb_t* t, process_stack_frame* frame, int signo,
+                      uint64_t handler, uint64_t restorer);
 
+                      
+uint64_t signal_return(tcb_t* t, process_stack_frame* frame);
+void     signal_deliver_pending(process_stack_frame* frame);
 //constructors
 pcb_t* new_usproc(pcb_t* parent, void* entry, char* name, physptr_t page_dir,
     char** argv, char** envp);

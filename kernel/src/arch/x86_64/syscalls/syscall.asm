@@ -56,7 +56,7 @@ sti
 
     ;change the saved rax to the ret addr
     mov [rsp + 14*8], rax
-
+cli
     POP_ALL
 
     ; stack now holds the iretq frame

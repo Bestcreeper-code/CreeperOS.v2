@@ -218,6 +218,24 @@ ssize_t syscall_handler(
         case SYS_UNLINK: // sys_unlink
             return sys_unlink((const __user char*)rdi);
         
+        case SYS_GETUID:
+            return sys_getuid();
+
+        case SYS_GETGID:
+            return sys_getgid();
+
+        case SYS_SETUID:
+            return sys_setuid(rdi);
+
+        case SYS_SETGID:
+            return sys_setgid(rdi);
+           
+        case SYS_GETGROUPS: 
+            return sys_getgroups((size_t)rdi, (__user gid_t*)rsi);
+
+        case SYS_SETGROUPS: 
+            return sys_getgroups((size_t)rdi, (__user gid_t*)rsi);
+
         case SYS_ARCH_PRCTL:
             return sys_arch_prctl(rdi, (unsigned long*) rsi);
         case SYS_GETTID:
@@ -267,7 +285,7 @@ int sys_open(
         return -E_INVAL;
 
     char kpath[PATH_MAX];
-    copy_from_user(kpath, (const __user void*)filename, sizeof(kpath));
+    strncpy_from_user(kpath, (const __user char*)filename, sizeof(kpath));
 
     struct inode* start = path_resolve_start(kpath);
     if (!start)
@@ -580,7 +598,7 @@ uintptr_t sys_brk(size_t brk) {
             old_page,
             phys,
             pages,
-            PTE_WRITABLE | PTE_USER
+            PTE_WRITABLE | PTE_USER | PTE_LOCAL_OWNED | PTE_NX
         );
     }
     else if (new_page < old_page) {
@@ -767,7 +785,7 @@ int sys_mkdir(
     const __user char* path,
     int mode
 ) {
-#if (SYSCALL_DEBUG ==2)
+#if (SYSCALL_DEBUG == 2)
     Sys_Debug("mkdir called: path=%p, mode=%o\n", (void*)path, (unsigned)mode);
 #endif
 
@@ -775,7 +793,7 @@ int sys_mkdir(
         return -E_INVAL;
 
     char kpath[PATH_MAX];
-    copy_from_user(kpath, (const __user void*)path, sizeof(kpath));
+    strncpy_from_user(kpath, (const __user char*)path, sizeof(kpath));
     
 
     struct inode* start = path_resolve_start(kpath);
@@ -790,7 +808,7 @@ int sys_create(
     const __user char* path,
     int mode
 ) {
-#if (SYSCALL_DEBUG ==2)
+#if (SYSCALL_DEBUG == 2)
     Sys_Debug("create called: path=%p, mode=%o\n", (void*)path, (unsigned)mode);
 #endif
 
@@ -798,7 +816,7 @@ int sys_create(
         return -E_INVAL;
 
     char kpath[PATH_MAX];
-    copy_from_user(kpath, (const __user void*)path, sizeof(kpath));
+    strncpy_from_user(kpath, (const __user char*)path, sizeof(kpath));
     
 
     struct inode* start = path_resolve_start(kpath);
@@ -870,7 +888,60 @@ int sys_unlink(
 }
 
 
+int sys_getuid() {
+    return current_process->uid;
+}
 
+int sys_getgid() {
+    return current_process->gid;
+}
+
+int sys_setuid(uid_t uid){
+    if (current_process->uid != 0 && current_process->uid != uid)
+        return -E_PERM;
+    current_process->uid = uid;
+    return 0;
+}
+
+int sys_setgid(gid_t gid) {
+    if (current_process->uid != 0 && !groups_list_has(gid, current_process)){
+        return -E_PERM;
+    }
+    current_process->gid = gid;
+    return 0;
+}
+
+int sys_getgroups(
+    size_t size,
+    __user gid_t* list
+) {
+    int grp_size = sizeof(gid_t) * current_process->ngroups;
+    int copy_size = (size < grp_size) ? size : grp_size;
+
+    copy_to_user(list, current_process->groups, copy_size);
+
+    return current_process->ngroups;
+}
+
+int sys_setgroups(
+    size_t size,
+    __user gid_t* list
+) {
+    if (current_process->uid != 0)
+        return -E_PERM;
+
+    void* buff = kmalloc(size);
+    if (!buff)
+        return -E_NOMEM;
+
+    copy_from_user(buff, list, size);
+
+    kfree(current_process->groups);
+    
+    current_process->groups = (kgid_t*)buff;
+    current_process->ngroups = size / sizeof(kgid_t);
+    return 0;
+}
 
 
 

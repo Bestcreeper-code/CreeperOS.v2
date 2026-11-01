@@ -103,6 +103,10 @@ struct file_operations {
 
     loff_t (*lseek) (struct file*, loff_t, int);
 
+    int (*fsync)(struct file *, loff_t, loff_t, int);
+    
+
+
     int (*ioctl)(struct file*, int op, unsigned long);
 };
 

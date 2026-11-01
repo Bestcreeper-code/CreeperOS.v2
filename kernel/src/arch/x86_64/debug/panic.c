@@ -18,8 +18,11 @@
 
 
 static isr_handler isr_handlers[32] = {
+    [ISR_DIVIDE_BY_ZERO] = handle_zero_div,
     [ISR_DOUBLE_FAULT] = handle_double_fault,
-    [ISR_PAGE_FAULT] = handle_page_fault
+    [ISR_PAGE_FAULT] = handle_page_fault,
+    [ISR_GENERAL_PROTECTION] = handle_gpf,
+
 };
 
 // CPU Exceptions
@@ -211,8 +214,11 @@ void _panic_dump(const char* error, const char* info,
                       regs->cr4, regs->cr8);
 
         sti();
+
+#if !DISABLE_MAPPINGS_DUMP
         void dump_userspace_mappings(uint64_t* pml4);
         dump_userspace_mappings(PHYS_2_HHDM(regs->cr3));
+#endif
         if (call_stack) {
             Sys_log_NoPos(" Call Stack Trace:\n");
             for (int i = 0; i < MAX_STACK_TRACE_SIZE; i++) {
@@ -250,4 +256,8 @@ isr_ret handle_page_fault(cpu_registers_t* regs, size_t* call_stack) {
     bool null_deref = regs->cr2 < PAGE_SIZE_4K;
     kill_current_process(regs, 128 + SIGSEGV,
         null_deref ? "null pointer dereference" : "page fault");
+}
+
+isr_ret handle_gpf(cpu_registers_t* regs, size_t* call_stack) {
+    kill_current_process(regs, 128 + SIGSEGV, "general protection fault");
 }

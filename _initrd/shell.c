@@ -1,4 +1,4 @@
-#include "stdlib.h"
+#include <stdlib.h>
 #include <stdbool.h>
 #include <string.h>
 #include <unistd.h>
@@ -6,8 +6,11 @@
 #include <sys/wait.h>
 #include <dirent.h>
 
-int list_dir(int argc, char* argv[]){
-    char* path = ".";
+#define LINE_MAX_LEN 256
+#define MAX_ARGS 128
+
+int list_dir(int argc, char* argv[]) {
+    const char* path = ".";
     if (argc > 1) {
         path = argv[1];
     }
@@ -17,11 +20,11 @@ int list_dir(int argc, char* argv[]){
         perror("opendir");
         return 1;
     }
-    
+
     struct dirent* entry;
     while ((entry = readdir(dir)) != NULL) {
         if (entry->d_type == DT_DIR) {
-            printf("\e[93m%s/\e[0m\n", entry->d_name);
+            printf("\033[93m%s/\033[0m\n", entry->d_name);
         } else {
             printf("%s\n", entry->d_name);
         }
@@ -31,9 +34,9 @@ int list_dir(int argc, char* argv[]){
     return 0;
 }
 
-int cat_file(int argc, char* argv[]){
+int cat_file(int argc, char* argv[]) {
     if (argc < 2) {
-        fprintf(stderr, "cat <file>\n");
+        fprintf(stderr, "usage: cat <file>\n");
         return 1;
     }
 
@@ -44,85 +47,106 @@ int cat_file(int argc, char* argv[]){
     }
 
     char buffer[1024];
-    size_t bytesRead;
-    while ((bytesRead = fread(buffer, 1, sizeof(buffer), file)) > 0) {
-        fwrite(buffer, 1, bytesRead, stdout);
+    size_t bytes_read;
+    while ((bytes_read = fread(buffer, 1, sizeof(buffer), file)) > 0) {
+        fwrite(buffer, 1, bytes_read, stdout);
     }
 
     fclose(file);
     return 0;
 }
 
+static int read_line(char* buf, size_t size) {
+    size_t pos = 0;
+
+    while (pos < size - 1) {
+        char c;
+
+        if (read(STDIN_FILENO, &c, 1) <= 0) {
+            if (pos == 0)
+                return -1;
+            break;
+        }
+
+        if (c == '\n' || c == '\r') {
+            write(STDOUT_FILENO, "\n", 1);
+            break;
+        }
+
+        if (c == '\b' || c == 127) {
+            if (pos > 0) {
+                pos--;
+                write(STDOUT_FILENO, "\b \b", 3);
+            }
+            continue;
+        }
+
+        buf[pos++] = c;
+        write(STDOUT_FILENO, &c, 1);
+    }
+
+    buf[pos] = '\0';
+    return (int)pos;
+}
+
 int main(int argc, char* argv[], char* envp[])
 {
-    printf(" welcome to CreeperOS :^)");
-    char buffer[256];
+    setvbuf(stdout, NULL, _IONBF, 0);
 
+    printf("welcome to CreeperOS :^)\n");
+
+    char buffer[LINE_MAX_LEN];
+    char* new_argv[MAX_ARGS];
+    int new_argc = 0;
+
+    bool first_cmd = true;
     while (true) {
-        int pos = 0;
-
-        write(STDOUT_FILENO, "> ", 2);
-
-        while (pos < sizeof(buffer) - 1) {
-            char c;
-
-            // Read exactly one character from the keyboard
-            if (read(STDIN_FILENO, &c, 1) <= 0)
-                break;
-
-            // Enter
-            if (c == '\n' || c == '\r') {
-                write(STDOUT_FILENO, "\n", 1);
-                break;
+        if (first_cmd && argc > 1) {
+            
+            new_argc = 0;
+            for (int i = 1; i < argc && new_argc < MAX_ARGS - 1; i++) {
+                new_argv[new_argc++] = argv[i];
             }
+            new_argv[new_argc] = NULL;
+            first_cmd = false;
+        } else {
+            first_cmd = false;
 
-            // Backspace
-            if (c == '\b' || c == 127) {
-                if (pos > 0) {
-                    pos--;
+            write(STDOUT_FILENO, "> ", 2);
+            new_argc = 0;
+            buffer[0] = '\0';
+            int len = read_line(buffer, sizeof(buffer));
+            if (len < 0) {
+                write(STDOUT_FILENO, "\n", 1);
+                exit(0);
+            }
+            if (len == 0)
+                continue;
 
-                    write(STDOUT_FILENO, "\b \b", 3);
-                }
+            new_argc = 0;
+            char* token = strtok(buffer, " \t");
+            while (token != NULL && new_argc < MAX_ARGS - 1) {
+                new_argv[new_argc++] = token;
+                token = strtok(NULL, " \t");
+            }
+            new_argv[new_argc] = NULL;
+
+            if (new_argc == 0)
+                continue;
+        }
+
+        /* Builtins */
+        if (strcmp(new_argv[0], "cd") == 0) {
+            if (new_argc < 2) {
+                fprintf(stderr, "cd: missing argument\n");
                 continue;
             }
-
-            // Store character
-            buffer[pos++] = c;
-
-            // Immediately send character to screen
-            write(STDOUT_FILENO, &c, 1);
-        }
-
-        buffer[pos] = '\0';
-
-        if (pos == 0)
+            if (chdir(new_argv[1]) < 0) {
+                perror("chdir");
+            }
             continue;
-
-        char* new_argv[128];
-        int new_argc = 0;
-
-        char* token = strtok(buffer, " \t");
-
-        while (token != NULL &&
-               new_argc < 127) {
-
-            new_argv[new_argc++] = token;
-            token = strtok(NULL, " \t");
         }
-
-        new_argv[new_argc] = NULL;
-
-        if (new_argc == 0)
-            continue;
-
-
-
-
-
-
-
-
-        if (strcmp(new_argv[0], "ls") == 0) {
+        else if (strcmp(new_argv[0], "ls") == 0) {
             list_dir(new_argc, new_argv);
             continue;
         }
@@ -135,30 +159,17 @@ int main(int argc, char* argv[], char* envp[])
             continue;
         }
         else if (strcmp(new_argv[0], "exit") == 0) {
-            if(new_argc > 1) {
-                int exit_code = atoi(new_argv[1]);
-                exit(exit_code);
-            }
-            exit(0);
-            continue;
+            exit(new_argc > 1 ? atoi(new_argv[1]) : 0);
         }
 
-
-
-
-
-
-
-
+        
         pid_t pid = fork();
 
         if (pid == 0) {
             execve(new_argv[0], new_argv, envp);
             perror("exec");
-            exit(1);
-        }
-
-        if (pid > 0) {
+            _exit(1);
+        } else if (pid > 0) {
             waitpid(pid, NULL, 0);
         } else {
             perror("fork");

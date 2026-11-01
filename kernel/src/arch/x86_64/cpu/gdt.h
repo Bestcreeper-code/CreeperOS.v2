@@ -36,7 +36,7 @@ struct gdt_ptr64 {
     uint64_t base;
 } __attribute__((packed));
 
-/* 64-bit TSS */
+
 struct tss64 {
     uint32_t reserved0;
     uint64_t rsp0;

@@ -209,13 +209,6 @@ void kmain() {
     sti();
     
     char* test_argv[] = {
-        "/bin/test_task",
-        "-s",
-        "123",
-        "-m",
-        "1048576",
-        "-n",
-        "100",
         NULL
     };
     

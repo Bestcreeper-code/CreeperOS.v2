@@ -99,6 +99,7 @@ static void map_4k_nolock(uint64_t* pml4, uintptr_t va, uintptr_t pa, uint64_t f
     uint64_t* pd   = table_get_or_create(pdpt, PDPT_INDEX(va), flags);
     uint64_t* pt   = table_get_or_create(pd,   PD_INDEX(va),   flags);
     pt[PT_INDEX(va)] = (pa & PTE_ADDR_MASK) | flags | PTE_PRESENT;
+    invlpg(va);
 }
 
 void map_4k(uint64_t* pml4, uintptr_t va, uintptr_t pa, uint64_t flags) {
@@ -125,6 +126,7 @@ static void map_2m_nolock(uint64_t* pml4, uintptr_t va, uintptr_t pa, uint64_t f
     uint64_t* pdpt = table_get_or_create(pml4, PML4_INDEX(va), flags);
     uint64_t* pd   = table_get_or_create(pdpt, PDPT_INDEX(va), flags);
     pd[PD_INDEX(va)] = (pa & PTE_ADDR_MASK) | flags | PTE_HUGE | PTE_PRESENT;
+    invlpg(va);
 }
 
 void map_2m(uint64_t* pml4, uintptr_t va, uintptr_t pa, uint64_t flags) {
@@ -151,6 +153,7 @@ void map_2m_pages(uint64_t* pml4, uintptr_t va, uintptr_t pa,
 static void map_1g_nolock(uint64_t* pml4, uintptr_t va, uintptr_t pa, uint64_t flags) {
     uint64_t* pdpt = table_get_or_create(pml4, PML4_INDEX(va), flags);
     pdpt[PDPT_INDEX(va)] = (pa & PTE_ADDR_MASK) | flags | PTE_HUGE | PTE_PRESENT;
+    invlpg(va);
 }
 
 void map_1g(uint64_t* pml4, uintptr_t va, uintptr_t pa, uint64_t flags) {
@@ -708,35 +711,36 @@ uintptr_t uvma_map_pages(
 
 
 
+static void vmm_free_user_tables(uint64_t* table, int level) {
+    size_t n = (level == 4) ? 256 : 512;
+    
+    for (size_t i = 0; i < n; i++) {
+        uint64_t e = table[i];
+        if (!(e & PTE_PRESENT)) continue;
+        uintptr_t phys = e & PTE_ADDR_MASK;
 
-
-static void vmm_free_owned_recursive(uint64_t* table, int level) {
-    for (size_t i = 0; i < 512; i++) {
-        uint64_t entry = table[i];
-        if (!(entry & PTE_PRESENT))
-            continue;
-        
-        if (!(entry & PTE_LOCAL_OWNED))
-            continue;
-
-        int is_leaf = (level == 1) || (entry & PTE_HUGE);
-        uintptr_t phys = entry & PTE_ADDR_MASK;
-
-        if (is_leaf) {
+        bool leaf = (level == 1) || (level < 4 && (e & PTE_HUGE));
+        if (leaf) {
+            if (e & PTE_LOCAL_OWNED) pmm_free(phys);
+        } else {
+            vmm_free_user_tables((uint64_t*)PHYS_2_HHDM(phys), level - 1);
             pmm_free(phys);
-            table[i] = 0;
-            continue;
         }
-        uint64_t* child = (uint64_t*)PHYS_2_HHDM(phys);
-        vmm_free_owned_recursive(child, level - 1);
-        pmm_free(phys);
         table[i] = 0;
     }
 }
 
+
 void vmm_pagetable_free_owned(physptr_t pml4_phys) {
+    if (!pml4_phys || pml4_phys == kernel_pagedir_phys) return;
+    if (cr3_get() == pml4_phys) {
+        Sys_Error("free_owned: pml4 %p is current cr3\n", (void*)pml4_phys);
+        return;
+    }
+
     unsigned long irq_flags = vmm_lock_acquire();
-    uint64_t* pml4 = (uint64_t*)PHYS_2_HHDM(pml4_phys );
-    vmm_free_owned_recursive(pml4, 4);
+    vmm_free_user_tables((uint64_t*)PHYS_2_HHDM(pml4_phys), 4);
     vmm_lock_release(irq_flags);
+
+    pmm_free(pml4_phys);
 }

@@ -1,7 +1,13 @@
 [binaries]
 c = 'gcc'
 cpp = 'g++'
-
+#why tf does my cc not work 💀
+#c = 'x86_64-creeperos-gcc'
+#cpp = 'x86_64-creeperos-g++'
+#ar = 'x86_64-creeperos-ar'
+#strip = 'x86_64-creeperos-strip'
+#ld = 'x86_64-creeperos-ld'
+#
 [host_machine]
 system = 'creeperos'
 cpu_family = 'x86_64'

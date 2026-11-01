@@ -366,6 +366,11 @@ void kfree_impl(void* _Memory) {
     uintptr_t  address = (uintptr_t)_Memory;
     uintptr_t* sizeptr = (uintptr_t* )(address - sizeof(uintptr_t));
     size_t     size = *sizeptr + sizeof(uintptr_t);
+    if (size == 0) {
+        Sys_Error("kfree: size is zero for pointer %p\n", _Memory);
+        heap_lock_release(irq_flags);
+        return;
+    }
     size = (size + 7) & ~7U;
 
     int placed = 0;
@@ -501,7 +506,7 @@ void page_kfree(uintptr_t va, size_t count) {
     uintptr_t pa = vmm_virt_to_phys(va);
 
     for (size_t i = 0; i < count; i++)
-        vmm_unmap_page(ADDR_TO_PAGE(va + i * PMM_PAGE_SIZE));
+        vmm_unmap_page(va + i * PMM_PAGE_SIZE);
 
     pmm_free_pages(pa, count);
     kvma_free(va, count);

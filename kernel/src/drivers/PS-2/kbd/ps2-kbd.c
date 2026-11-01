@@ -1,3 +1,4 @@
+#include "arch/vmm.h"
 #include "cpu/cpu.h"
 #include "debug/Logger.h"
 #include "arch/interrupts.h"
@@ -205,9 +206,9 @@ void ps2_keyboard_handler(void* frame) {
     if(ch=='C') cpu_log_specs();
     if(ch=='M') {
         char buff[100];
-        byte_nb_simplify(pmm_get_total_pages() - pmm_get_free_pages(), buff, 4);
+        byte_nb_simplify((pmm_get_total_pages() - pmm_get_free_pages())*PAGE_SIZE_4K, buff, 4);
         Sys_log_NoPos(ESC_BG_YELLOW"Ram: %s", buff);
-        byte_nb_simplify(pmm_get_total_pages(), buff, 4);
+        byte_nb_simplify(pmm_get_total_pages()*PAGE_SIZE_4K, buff, 4);
         Sys_log_NoPos("/ %s"ESC_RESET"\n", buff);
     }
     _current_eoi((uint8_t)HARDCODED_PS2_KBD_INTERRUPT_VECTOR_INDEX);

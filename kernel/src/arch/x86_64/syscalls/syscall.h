@@ -46,6 +46,15 @@
 
 #define SYS_UNLINK 87
 
+#define SYS_GETUID 102
+
+#define SYS_GETGID 104
+#define SYS_SETUID 105
+#define SYS_SETGID 106
+
+#define SYS_GETGROUPS 115
+#define SYS_SETGROUPS 116
+
 #define SYS_ARCH_PRCTL 158
 
 #define SYS_GETTID 186
@@ -203,6 +212,22 @@ int sys_dup(
 
 int sys_chdir(
     const __user char* path
+);
+
+
+int sys_getuid();
+int sys_getgid();
+int sys_setuid(uid_t uid);
+int sys_setgid(gid_t gid);
+
+int sys_getgroups(
+    size_t size,
+    __user gid_t* list
+);
+
+int sys_setgroups(
+    size_t size,
+    __user gid_t* list
 );
 
 #define ARCH_PRCTL_SET_FS 0x1002

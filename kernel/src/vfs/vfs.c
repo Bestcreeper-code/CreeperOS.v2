@@ -90,6 +90,9 @@ int vfs_create(struct inode *dir, struct dentry *dentry, umode_t mode, bool excl
     new_inode->i_mode = mode;
     new_inode->i_op   = dir->i_op;
     new_inode->i_fop  = dir->i_fop;
+    
+    new_inode->i_uid  = current_process ? current_process->uid : 0;
+    new_inode->i_gid  = current_process ? current_process->gid : 0;
 
     new_inode->i_dentry  = dentry;
     new_inode->i_count   = 0;
